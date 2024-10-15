@@ -26,14 +26,21 @@ async def format_crypto_data(data):
         try:
             volume = float(item['volume'])
             price = float(item['lastPrice'])
+            price_change = float(item['priceChange'])
+            price_change_percent = float(item['priceChangePercent'])
             volume_usdt = volume * price  # Convert volume to USDT
             
-            logger.info(f"Calculated volume for {item['symbol']}: {volume_usdt} USDT")
+            logger.info(f"Data for {item['symbol']}:")
+            logger.info(f"  Price: {price}")
+            logger.info(f"  Price Change: {price_change}")
+            logger.info(f"  Price Change Percent: {price_change_percent}%")
+            logger.info(f"  Volume: {volume}")
+            logger.info(f"  Volume in USDT: {volume_usdt}")
             
             formatted_item = {
                 'symbol': item['symbol'],
                 'price': price,
-                'change': float(item['priceChangePercent']),
+                'change': price_change_percent,
                 'high': float(item['highPrice']),
                 'low': float(item['lowPrice']),
                 'volume': volume_usdt

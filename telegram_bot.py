@@ -3,18 +3,20 @@ import os
 import asyncio
 from time import sleep
 from dotenv import load_dotenv
-from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import NetworkError
-
-from models.price_prediction import calculate_ahr999, get_current_price
-from models.investment_advice import get_investment_advice  # 新增这行
-from binance_api.market_data import get_top_crypto_data, format_crypto_data
 
 # 加载环境变量
 load_dotenv()
 
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import NetworkError
+
+from models.price_prediction import calculate_ahr999, get_current_price
+from models.investment_advice import get_investment_advice
+from binance_api.market_data import get_top_crypto_data, format_crypto_data
+
 # 设置你的bot token
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+AUTHORIZED_USER_ID = int(os.getenv('AUTHORIZED_USER_ID'))
 
 # 设置日志
 logging.basicConfig(
@@ -23,6 +25,9 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+def is_authorized(user_id):
+    return user_id == AUTHORIZED_USER_ID
 
 def get_main_menu_keyboard():
     keyboard = [
@@ -95,7 +100,7 @@ async def show_market_price(bot, query):
         for data in formatted_data:
             message += f"{data['symbol']}:\n"
             message += f"Price: ${format_number(data['price'])}\n"
-            message += f"24h Change: {format_number(data['change'])}%\n"
+            message += f"24h Change: {format_number(data['change'], 2)}%\n"
             message += f"24h High: ${format_number(data['high'])}\n"
             message += f"24h Low: ${format_number(data['low'])}\n"
             message += f"24h Volume: {format_number(data['volume'])} USDT\n\n"
@@ -164,13 +169,23 @@ async def handle_message(bot, update):
     await start(bot, update)
 
 async def process_update(bot, update):
+    user_id = update.effective_user.id
     if update.message:
         if update.message.text == '/start':
             await start(bot, update)
         else:
             await handle_message(bot, update)
     elif update.callback_query:
-        await button_callback(bot, update)
+        if update.callback_query.data == 'place_order':
+            if is_authorized(user_id):
+                await show_order_menu(bot, update.callback_query)
+            else:
+                await bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="You are not authorized to place orders."
+                )
+        else:
+            await button_callback(bot, update)
 
 async def main():
     """运行 Telegram 机器人"""
