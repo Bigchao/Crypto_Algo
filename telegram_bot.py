@@ -13,6 +13,7 @@ from telegram.error import NetworkError
 from models.price_prediction import calculate_ahr999, get_current_price
 from models.investment_advice import get_investment_advice
 from binance_api.market_data import get_top_crypto_data, format_crypto_data
+from binance_api.trading import trading_api, init_trading_api
 
 # 设置你的bot token
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -25,6 +26,18 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+# 在文件开头添加这个类定义
+class Context:
+    def __init__(self):
+        self.user_data = {}
+
+# 全局 context 对象
+context = Context()
+
+TOP_CRYPTOS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 
+                'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'MATICUSDT']
+AMOUNT_OPTIONS = [50, 100, 500, 1000]  # USDT 金额选项
 
 def is_authorized(user_id):
     return user_id == AUTHORIZED_USER_ID
@@ -134,11 +147,106 @@ async def show_market_price(bot, query):
         )
 
 async def show_order_menu(bot, query):
-    await bot.send_message(
+    if not is_authorized(query.from_user.id):
+        await bot.answer_callback_query(query.id, text="You are not authorized to place orders.")
+        return
+
+    keyboard = [[InlineKeyboardButton(crypto, callback_data=f'symbol_{crypto}')] for crypto in TOP_CRYPTOS]
+    keyboard.append([InlineKeyboardButton("Back to Main Menu", callback_data='main_menu')])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await bot.edit_message_text(
         chat_id=query.message.chat_id,
-        text="Order functionality is not implemented yet.",
-        reply_markup=get_main_menu_keyboard()
+        message_id=query.message.message_id,
+        text="Please select a trading pair:",
+        reply_markup=reply_markup
     )
+
+async def handle_symbol_selection(bot, query):
+    symbol = query.data.split('_')[1]
+    context.user_data['symbol'] = symbol
+    
+    keyboard = [
+        [InlineKeyboardButton("BUY", callback_data='side_BUY')],
+        [InlineKeyboardButton("SELL", callback_data='side_SELL')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await bot.edit_message_text(
+        chat_id=query.message.chat_id,
+        message_id=query.message.message_id,
+        text=f"Selected pair: {symbol}\nPlease choose BUY or SELL:",
+        reply_markup=reply_markup
+    )
+
+async def handle_side_selection(bot, query):
+    side = query.data.split('_')[1]
+    context.user_data['side'] = side
+    
+    keyboard = [[InlineKeyboardButton(f"{amount} USDT", callback_data=f'amount_{amount}')] for amount in AMOUNT_OPTIONS]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await bot.edit_message_text(
+        chat_id=query.message.chat_id,
+        message_id=query.message.message_id,
+        text=f"Selected: {context.user_data['symbol']} {side}\nPlease select the amount:",
+        reply_markup=reply_markup
+    )
+
+async def handle_amount_selection(bot, query):
+    amount = float(query.data.split('_')[1])
+    context.user_data['amount'] = amount
+    
+    symbol = context.user_data['symbol']
+    side = context.user_data['side']
+    
+    confirmation_text = (
+        f"Order Summary:\n"
+        f"Symbol: {symbol}\n"
+        f"Side: {side}\n"
+        f"Amount: {amount} USDT\n\n"
+        f"Do you confirm this order?"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("Confirm", callback_data='confirm_order')],
+        [InlineKeyboardButton("Cancel", callback_data='cancel_order')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await bot.edit_message_text(
+        chat_id=query.message.chat_id,
+        message_id=query.message.message_id,
+        text=confirmation_text,
+        reply_markup=reply_markup
+    )
+
+async def handle_order_confirmation(bot, query):
+    if query.data == 'confirm_order':
+        symbol = context.user_data['symbol']
+        side = context.user_data['side']
+        amount = context.user_data['amount']
+        
+        order = await trading_api.place_market_order(symbol, side, amount)
+        if order:
+            await bot.edit_message_text(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                text=f"Order placed successfully!\nOrder ID: {order['orderId']}",
+                reply_markup=get_main_menu_keyboard()
+            )
+        else:
+            await bot.edit_message_text(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                text="Failed to place the order. Please try again later.",
+                reply_markup=get_main_menu_keyboard()
+            )
+    else:
+        await bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="Order cancelled.",
+            reply_markup=get_main_menu_keyboard()
+        )
+    
+    context.user_data.clear()
 
 async def show_order_status(bot, query):
     await bot.send_message(
@@ -176,19 +284,23 @@ async def process_update(bot, update):
         else:
             await handle_message(bot, update)
     elif update.callback_query:
-        if update.callback_query.data == 'place_order':
-            if is_authorized(user_id):
-                await show_order_menu(bot, update.callback_query)
-            else:
-                await bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text="You are not authorized to place orders."
-                )
+        query = update.callback_query
+        if query.data == 'place_order':
+            await show_order_menu(bot, query)
+        elif query.data.startswith('symbol_'):
+            await handle_symbol_selection(bot, query)
+        elif query.data.startswith('side_'):
+            await handle_side_selection(bot, query)
+        elif query.data.startswith('amount_'):
+            await handle_amount_selection(bot, query)
+        elif query.data in ['confirm_order', 'cancel_order']:
+            await handle_order_confirmation(bot, query)
         else:
             await button_callback(bot, update)
 
 async def main():
     """运行 Telegram 机器人"""
+    await init_trading_api()
     bot = Bot(TOKEN)
     logger.info("Starting bot")
     
@@ -206,7 +318,7 @@ async def main():
             sleep(1)
 
 def run_bot():
-    """启动机器人的入口函数"""
+    """启机器人的入口函数"""
     logger.info("Starting bot from run_bot function")
     asyncio.run(main())
 
