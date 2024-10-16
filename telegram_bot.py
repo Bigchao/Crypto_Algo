@@ -219,30 +219,44 @@ async def handle_amount_selection(bot, query):
 
 async def handle_order_confirmation(bot, query):
     if query.data == 'confirm_order':
+        context.user_data['state'] = 'waiting_for_confirmation_code'
+        await bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="Please enter the 6-digit confirmation code to proceed with the order:"
+        )
+    else:
+        await bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="Order cancelled.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        context.user_data.clear()
+
+async def handle_confirmation_code(bot, message):
+    if message.text == CONFIRMATION_CODE:
         symbol = context.user_data['symbol']
         side = context.user_data['side']
         amount = context.user_data['amount']
         
         order = await trading_api.place_market_order(symbol, side, amount)
         if order:
-            await bot.edit_message_text(
-                chat_id=query.message.chat_id,
-                message_id=query.message.message_id,
+            await bot.send_message(
+                chat_id=message.chat_id,
                 text=f"Order placed successfully!\nOrder ID: {order['orderId']}",
                 reply_markup=get_main_menu_keyboard()
             )
         else:
-            await bot.edit_message_text(
-                chat_id=query.message.chat_id,
-                message_id=query.message.message_id,
+            await bot.send_message(
+                chat_id=message.chat_id,
                 text="Failed to place the order. Please try again later.",
                 reply_markup=get_main_menu_keyboard()
             )
     else:
-        await bot.edit_message_text(
-            chat_id=query.message.chat_id,
-            message_id=query.message.message_id,
-            text="Order cancelled.",
+        await bot.send_message(
+            chat_id=message.chat_id,
+            text="Invalid confirmation code. Order cancelled.",
             reply_markup=get_main_menu_keyboard()
         )
     
@@ -281,6 +295,8 @@ async def process_update(bot, update):
     if update.message:
         if update.message.text == '/start':
             await start(bot, update)
+        elif context.user_data.get('state') == 'waiting_for_confirmation_code':
+            await handle_confirmation_code(bot, update.message)
         else:
             await handle_message(bot, update)
     elif update.callback_query:
@@ -324,6 +340,8 @@ def run_bot():
 
 def format_number(number, decimal_places=2):
     return f"{number:,.{decimal_places}f}"
+
+CONFIRMATION_CODE = "011626"  # 添加这行来定义确认码
 
 if __name__ == '__main__':
     run_bot()
