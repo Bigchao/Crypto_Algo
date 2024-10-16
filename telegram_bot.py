@@ -27,17 +27,16 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# 在文件开头添加这个类定义
 class Context:
     def __init__(self):
         self.user_data = {}
 
-# 全局 context 对象
 context = Context()
 
 TOP_CRYPTOS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 
                 'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'MATICUSDT']
 AMOUNT_OPTIONS = [50, 100, 500, 1000]  # USDT 金额选项
+CONFIRMATION_CODE = "011626"  # 确认码
 
 def is_authorized(user_id):
     return user_id == AUTHORIZED_USER_ID
@@ -53,7 +52,6 @@ def get_main_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 async def start(bot, update):
-    """发送欢迎消息和主菜单"""
     logger.info(f"User {update.effective_user.id} started the bot")
     await bot.send_message(
         chat_id=update.effective_chat.id,
@@ -118,7 +116,6 @@ async def show_market_price(bot, query):
             message += f"24h Low: ${format_number(data['low'])}\n"
             message += f"24h Volume: {format_number(data['volume'])} USDT\n\n"
 
-        # 如果消息太长，分割它
         if len(message) > 4096:
             messages = [message[i:i+4096] for i in range(0, len(message), 4096)]
             for msg in messages:
@@ -132,7 +129,6 @@ async def show_market_price(bot, query):
                 text=message
             )
         
-        # 发送完数据后，显示主菜单
         await bot.send_message(
             chat_id=query.message.chat_id,
             text="What would you like to do next?",
@@ -151,15 +147,31 @@ async def show_order_menu(bot, query):
         await bot.answer_callback_query(query.id, text="You are not authorized to place orders.")
         return
 
-    keyboard = [[InlineKeyboardButton(crypto, callback_data=f'symbol_{crypto}')] for crypto in TOP_CRYPTOS]
-    keyboard.append([InlineKeyboardButton("Back to Main Menu", callback_data='main_menu')])
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    context.user_data['state'] = 'waiting_for_confirmation_code'
     await bot.edit_message_text(
         chat_id=query.message.chat_id,
         message_id=query.message.message_id,
-        text="Please select a trading pair:",
-        reply_markup=reply_markup
+        text="Please enter the 6-digit confirmation code to proceed placing order:"
     )
+
+async def handle_confirmation_code(bot, message):
+    if message.text == CONFIRMATION_CODE:
+        keyboard = [[InlineKeyboardButton(crypto, callback_data=f'symbol_{crypto}')] for crypto in TOP_CRYPTOS]
+        keyboard.append([InlineKeyboardButton("Back to Main Menu", callback_data='main_menu')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await bot.send_message(
+            chat_id=message.chat_id,
+            text="Confirmation code correct. Please select a trading pair:",
+            reply_markup=reply_markup
+        )
+        context.user_data['state'] = 'selecting_symbol'
+    else:
+        await bot.send_message(
+            chat_id=message.chat_id,
+            text="Invalid confirmation code. Order process cancelled.",
+            reply_markup=get_main_menu_keyboard()
+        )
+        context.user_data.clear()
 
 async def handle_symbol_selection(bot, query):
     symbol = query.data.split('_')[1]
@@ -219,44 +231,39 @@ async def handle_amount_selection(bot, query):
 
 async def handle_order_confirmation(bot, query):
     if query.data == 'confirm_order':
-        context.user_data['state'] = 'waiting_for_confirmation_code'
-        await bot.edit_message_text(
-            chat_id=query.message.chat_id,
-            message_id=query.message.message_id,
-            text="Please enter the 6-digit confirmation code to proceed with the order:"
-        )
+        try:
+            symbol = context.user_data['symbol']
+            side = context.user_data['side']
+            amount = context.user_data['amount']
+            
+            order = await trading_api.place_market_order(symbol, side, amount)
+            if order:
+                await bot.edit_message_text(
+                    chat_id=query.message.chat_id,
+                    message_id=query.message.message_id,
+                    text=f"Order placed successfully!\nOrder ID: {order['orderId']}",
+                    reply_markup=get_main_menu_keyboard()
+                )
+            else:
+                await bot.edit_message_text(
+                    chat_id=query.message.chat_id,
+                    message_id=query.message.message_id,
+                    text="Failed to place the order. Please try again later.",
+                    reply_markup=get_main_menu_keyboard()
+                )
+        except Exception as e:
+            logger.error(f"Error in handle_order_confirmation: {str(e)}")
+            await bot.edit_message_text(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                text=f"An error occurred: {str(e)}",
+                reply_markup=get_main_menu_keyboard()
+            )
     else:
         await bot.edit_message_text(
             chat_id=query.message.chat_id,
             message_id=query.message.message_id,
             text="Order cancelled.",
-            reply_markup=get_main_menu_keyboard()
-        )
-        context.user_data.clear()
-
-async def handle_confirmation_code(bot, message):
-    if message.text == CONFIRMATION_CODE:
-        symbol = context.user_data['symbol']
-        side = context.user_data['side']
-        amount = context.user_data['amount']
-        
-        order = await trading_api.place_market_order(symbol, side, amount)
-        if order:
-            await bot.send_message(
-                chat_id=message.chat_id,
-                text=f"Order placed successfully!\nOrder ID: {order['orderId']}",
-                reply_markup=get_main_menu_keyboard()
-            )
-        else:
-            await bot.send_message(
-                chat_id=message.chat_id,
-                text="Failed to place the order. Please try again later.",
-                reply_markup=get_main_menu_keyboard()
-            )
-    else:
-        await bot.send_message(
-            chat_id=message.chat_id,
-            text="Invalid confirmation code. Order cancelled.",
             reply_markup=get_main_menu_keyboard()
         )
     
@@ -275,7 +282,7 @@ async def show_help(bot, query):
         "Here are the available commands:\n"
         "- Calculate AHR999 Index: Get the current AHR999 index and investment advice\n"
         "- Current Market Price: Check current prices for top 10 cryptocurrencies\n"
-        "- Place Order: (Coming soon) Place a new order\n"
+        "- Place Order: Place a new order (requires confirmation code)\n"
         "- Order Status: (Coming soon) Check your order status\n"
         "- Help: Show this help message"
     )
@@ -286,7 +293,6 @@ async def show_help(bot, query):
     )
 
 async def handle_message(bot, update):
-    """处理所有文本消息，触发start功能"""
     logger.info(f"Received message from user {update.effective_user.id}: {update.message.text}")
     await start(bot, update)
 
@@ -303,7 +309,7 @@ async def process_update(bot, update):
         query = update.callback_query
         if query.data == 'place_order':
             await show_order_menu(bot, query)
-        elif query.data.startswith('symbol_'):
+        elif query.data.startswith('symbol_') and context.user_data.get('state') == 'selecting_symbol':
             await handle_symbol_selection(bot, query)
         elif query.data.startswith('side_'):
             await handle_side_selection(bot, query)
@@ -315,7 +321,6 @@ async def process_update(bot, update):
             await button_callback(bot, update)
 
 async def main():
-    """运行 Telegram 机器人"""
     await init_trading_api()
     bot = Bot(TOKEN)
     logger.info("Starting bot")
@@ -334,14 +339,11 @@ async def main():
             sleep(1)
 
 def run_bot():
-    """启机器人的入口函数"""
     logger.info("Starting bot from run_bot function")
     asyncio.run(main())
 
 def format_number(number, decimal_places=2):
     return f"{number:,.{decimal_places}f}"
-
-CONFIRMATION_CODE = "011626"  # 添加这行来定义确认码
 
 if __name__ == '__main__':
     run_bot()
