@@ -37,6 +37,7 @@ TOP_CRYPTOS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT',
                 'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'MATICUSDT']
 AMOUNT_OPTIONS = [50, 100, 500, 1000]  # USDT 金额选项
 CONFIRMATION_CODE = "011626"  # 确认码
+ORDER_TYPES = ['Market', 'Limit']
 
 def is_authorized(user_id):
     return user_id == AUTHORIZED_USER_ID
@@ -156,15 +157,14 @@ async def show_order_menu(bot, query):
 
 async def handle_confirmation_code(bot, message):
     if message.text == CONFIRMATION_CODE:
-        keyboard = [[InlineKeyboardButton(crypto, callback_data=f'symbol_{crypto}')] for crypto in TOP_CRYPTOS]
-        keyboard.append([InlineKeyboardButton("Back to Main Menu", callback_data='main_menu')])
+        keyboard = [[InlineKeyboardButton(order_type, callback_data=f'order_type_{order_type}') for order_type in ORDER_TYPES]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await bot.send_message(
             chat_id=message.chat_id,
-            text="Confirmation code correct. Please select a trading pair:",
+            text="Confirmation code correct. Please select order type:",
             reply_markup=reply_markup
         )
-        context.user_data['state'] = 'selecting_symbol'
+        context.user_data['state'] = 'selecting_order_type'
     else:
         await bot.send_message(
             chat_id=message.chat_id,
@@ -172,6 +172,19 @@ async def handle_confirmation_code(bot, message):
             reply_markup=get_main_menu_keyboard()
         )
         context.user_data.clear()
+
+async def handle_order_type_selection(bot, query):
+    order_type = query.data.split('_')[2]
+    context.user_data['order_type'] = order_type
+    
+    keyboard = [[InlineKeyboardButton(crypto, callback_data=f'symbol_{crypto}')] for crypto in TOP_CRYPTOS]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await bot.edit_message_text(
+        chat_id=query.message.chat_id,
+        message_id=query.message.message_id,
+        text=f"Selected order type: {order_type}\nPlease select a trading pair:",
+        reply_markup=reply_markup
+    )
 
 async def handle_symbol_selection(bot, query):
     symbol = query.data.split('_')[1]
@@ -206,28 +219,66 @@ async def handle_amount_selection(bot, query):
     amount = float(query.data.split('_')[1])
     context.user_data['amount'] = amount
     
+    if context.user_data['order_type'] == 'Limit':
+        await bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="Please enter the limit price:"
+        )
+        context.user_data['state'] = 'waiting_for_limit_price'
+    else:
+        await show_order_confirmation(bot, query)
+
+async def handle_limit_price_input(bot, message):
+    try:
+        price = float(message.text)
+        context.user_data['price'] = price
+        await show_order_confirmation(bot, message)
+    except ValueError:
+        await bot.send_message(
+            chat_id=message.chat_id,
+            text="Invalid price. Please enter a valid number."
+        )
+
+async def show_order_confirmation(bot, update):
     symbol = context.user_data['symbol']
     side = context.user_data['side']
+    amount = context.user_data['amount']
+    order_type = context.user_data['order_type']
     
     confirmation_text = (
         f"Order Summary:\n"
+        f"Type: {order_type}\n"
         f"Symbol: {symbol}\n"
         f"Side: {side}\n"
-        f"Amount: {amount} USDT\n\n"
-        f"Do you confirm this order?"
+        f"Amount: {amount} USDT\n"
     )
+    
+    if order_type == 'Limit':
+        price = context.user_data['price']
+        confirmation_text += f"Price: {price}\n"
+    
+    confirmation_text += "\nDo you confirm this order?"
     
     keyboard = [
         [InlineKeyboardButton("Confirm", callback_data='confirm_order')],
         [InlineKeyboardButton("Cancel", callback_data='cancel_order')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await bot.edit_message_text(
-        chat_id=query.message.chat_id,
-        message_id=query.message.message_id,
-        text=confirmation_text,
-        reply_markup=reply_markup
-    )
+    
+    if isinstance(update, telegram.CallbackQuery):
+        await bot.edit_message_text(
+            chat_id=update.message.chat_id,
+            message_id=update.message.message_id,
+            text=confirmation_text,
+            reply_markup=reply_markup
+        )
+    else:
+        await bot.send_message(
+            chat_id=update.chat_id,
+            text=confirmation_text,
+            reply_markup=reply_markup
+        )
 
 async def handle_order_confirmation(bot, query):
     if query.data == 'confirm_order':
@@ -235,8 +286,14 @@ async def handle_order_confirmation(bot, query):
             symbol = context.user_data['symbol']
             side = context.user_data['side']
             amount = context.user_data['amount']
+            order_type = context.user_data['order_type']
             
-            order = await trading_api.place_market_order(symbol, side, amount)
+            if order_type == 'Market':
+                order = await trading_api.place_market_order(symbol, side, amount)
+            else:  # Limit
+                price = context.user_data['price']
+                order = await trading_api.place_limit_order(symbol, side, amount, price)
+            
             if order:
                 await bot.edit_message_text(
                     chat_id=query.message.chat_id,
@@ -303,13 +360,17 @@ async def process_update(bot, update):
             await start(bot, update)
         elif context.user_data.get('state') == 'waiting_for_confirmation_code':
             await handle_confirmation_code(bot, update.message)
+        elif context.user_data.get('state') == 'waiting_for_limit_price':
+            await handle_limit_price_input(bot, update.message)
         else:
             await handle_message(bot, update)
     elif update.callback_query:
         query = update.callback_query
         if query.data == 'place_order':
             await show_order_menu(bot, query)
-        elif query.data.startswith('symbol_') and context.user_data.get('state') == 'selecting_symbol':
+        elif query.data.startswith('order_type_'):
+            await handle_order_type_selection(bot, query)
+        elif query.data.startswith('symbol_'):
             await handle_symbol_selection(bot, query)
         elif query.data.startswith('side_'):
             await handle_side_selection(bot, query)

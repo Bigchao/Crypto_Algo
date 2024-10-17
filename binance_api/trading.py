@@ -40,6 +40,29 @@ class TradingAPI:
             print(f"Error placing market order: {e}")
             return None
 
+    async def place_limit_order(self, symbol, side, amount, price):
+        try:
+            ticker = await self.client.get_symbol_ticker(symbol=symbol)
+            current_price = float(ticker['price'])
+            quantity = amount / current_price
+
+            if side == 'BUY':
+                order = await self.client.order_limit_buy(
+                    symbol=symbol,
+                    quantity=quantity,
+                    price=price
+                )
+            else:  # SELL
+                order = await self.client.order_limit_sell(
+                    symbol=symbol,
+                    quantity=quantity,
+                    price=price
+                )
+            return order
+        except Exception as e:
+            print(f"Error placing limit order: {e}")
+            return None
+
 trading_api = TradingAPI()
 
 async def init_trading_api():
