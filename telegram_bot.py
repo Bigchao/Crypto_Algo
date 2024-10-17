@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # 加载环境变量
 load_dotenv()
 
-from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.error import NetworkError
 
 from models.price_prediction import calculate_ahr999, get_current_price
@@ -266,7 +266,7 @@ async def show_order_confirmation(bot, update):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if isinstance(update, telegram.CallbackQuery):
+    if isinstance(update, CallbackQuery):
         await bot.edit_message_text(
             chat_id=update.message.chat_id,
             message_id=update.message.message_id,
