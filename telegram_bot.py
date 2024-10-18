@@ -157,7 +157,9 @@ async def show_order_menu(bot, query):
 
 async def handle_confirmation_code(bot, message):
     if message.text == CONFIRMATION_CODE:
-        keyboard = [[InlineKeyboardButton(order_type, callback_data=f'order_type_{order_type}') for order_type in ORDER_TYPES]]
+        keyboard = [
+            [InlineKeyboardButton(f"{order_type} Order", callback_data=f'order_type_{order_type}') for order_type in ORDER_TYPES]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await bot.send_message(
             chat_id=message.chat_id,
@@ -177,41 +179,36 @@ async def handle_order_type_selection(bot, query):
     order_type = query.data.split('_')[2]
     context.user_data['order_type'] = order_type
     
-    keyboard = [[InlineKeyboardButton(crypto, callback_data=f'symbol_{crypto}')] for crypto in TOP_CRYPTOS]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await bot.edit_message_text(
-        chat_id=query.message.chat_id,
-        message_id=query.message.message_id,
-        text=f"Selected order type: {order_type}\nPlease select a trading pair:",
-        reply_markup=reply_markup
-    )
-
-async def handle_symbol_selection(bot, query):
-    symbol = query.data.split('_')[1]
-    context.user_data['symbol'] = symbol
+    # 创建一个包含所有选项的键盘
+    keyboard = []
+    for crypto in TOP_CRYPTOS:
+        row = [
+            InlineKeyboardButton(f"{crypto} BUY", callback_data=f'order_{crypto}_BUY'),
+            InlineKeyboardButton(f"{crypto} SELL", callback_data=f'order_{crypto}_SELL')
+        ]
+        keyboard.append(row)
     
-    keyboard = [
-        [InlineKeyboardButton("BUY", callback_data='side_BUY')],
-        [InlineKeyboardButton("SELL", callback_data='side_SELL')]
-    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await bot.edit_message_text(
         chat_id=query.message.chat_id,
         message_id=query.message.message_id,
-        text=f"Selected pair: {symbol}\nPlease choose BUY or SELL:",
+        text=f"Selected order type: {order_type}\nPlease select a trading pair and side:",
         reply_markup=reply_markup
     )
 
-async def handle_side_selection(bot, query):
-    side = query.data.split('_')[1]
+async def handle_order_selection(bot, query):
+    _, symbol, side = query.data.split('_')
+    context.user_data['symbol'] = symbol
     context.user_data['side'] = side
     
+    # 创建一个包含金额选项的键盘
     keyboard = [[InlineKeyboardButton(f"{amount} USDT", callback_data=f'amount_{amount}')] for amount in AMOUNT_OPTIONS]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await bot.edit_message_text(
         chat_id=query.message.chat_id,
         message_id=query.message.message_id,
-        text=f"Selected: {context.user_data['symbol']} {side}\nPlease select the amount:",
+        text=f"Selected: {symbol} {side}\nPlease select the amount:",
         reply_markup=reply_markup
     )
 
@@ -370,10 +367,8 @@ async def process_update(bot, update):
             await show_order_menu(bot, query)
         elif query.data.startswith('order_type_'):
             await handle_order_type_selection(bot, query)
-        elif query.data.startswith('symbol_'):
-            await handle_symbol_selection(bot, query)
-        elif query.data.startswith('side_'):
-            await handle_side_selection(bot, query)
+        elif query.data.startswith('order_'):
+            await handle_order_selection(bot, query)
         elif query.data.startswith('amount_'):
             await handle_amount_selection(bot, query)
         elif query.data in ['confirm_order', 'cancel_order']:
