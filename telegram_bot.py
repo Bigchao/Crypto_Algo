@@ -3,6 +3,7 @@ import os
 import asyncio
 from time import sleep
 from dotenv import load_dotenv
+import aioschedule
 
 # 加载环境变量
 load_dotenv()
@@ -376,10 +377,39 @@ async def process_update(bot, update):
         else:
             await button_callback(bot, update)
 
+async def send_market_price_update(bot):
+    try:
+        crypto_data = await get_top_crypto_data()
+        formatted_data = await format_crypto_data(crypto_data)
+        
+        message = "Scheduled Market Update:\n\n"
+        for data in formatted_data:
+            message += f"{data['symbol']}:\n"
+            message += f"Price: ${format_number(data['price'])}\n"
+            message += f"24h Change: {format_number(data['change'], 2)}%\n\n"
+
+        # 这里应该从数据库或某个存储中获取订阅用户的列表
+        # 暂时我们只发送给授权用户
+        await bot.send_message(
+            chat_id=AUTHORIZED_USER_ID,
+            text=message
+        )
+    except Exception as e:
+        logger.error(f"Error in scheduled market price update: {str(e)}")
+
+async def schedule_market_updates(bot):
+    aioschedule.every(30).minutes.do(send_market_price_update, bot)
+    while True:
+        await aioschedule.run_pending()
+        await asyncio.sleep(1)
+
 async def main():
     await init_trading_api()
     bot = Bot(TOKEN)
     logger.info("Starting bot")
+    
+    # 启动定时任务
+    asyncio.create_task(schedule_market_updates(bot))
     
     offset = 0
     while True:
