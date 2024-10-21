@@ -398,7 +398,8 @@ async def send_market_price_update(bot):
         logger.error(f"Error in scheduled market price update: {str(e)}")
 
 async def schedule_market_updates(bot):
-    aioschedule.every(30).minutes.do(send_market_price_update, bot)
+    # 将这行代码从每30分钟改为每30秒
+    aioschedule.every(30).seconds.do(send_market_price_update, bot)
     while True:
         await aioschedule.run_pending()
         await asyncio.sleep(1)
