@@ -47,7 +47,7 @@ Start the bot in Telegram and use the provided menu to access different function
 - 问题：预期的每30秒更新没有发送。
 - 可能的原因：
   1. 异步任务未正确启动
-  2. 主循环阻塞
+  2. 主循环���塞
   3. 更新函数中的错误处理问题
   4. 环境变量问题
   5. 网络问题
@@ -68,3 +68,13 @@ Start the bot in Telegram and use the provided menu to access different function
   1. 运行更新后的代码，观察日志输出
   2. 如果日志显示函数被调用但消息未发送，检查 Telegram API 连接
   3. 考虑使用 `asyncio.gather` 来并行运行主循环和定时任务
+
+### 2023-XX-XX：实现并行运行主循环和定时任务
+
+- 问题：定时任务可能没有被正确执行
+- 解决方案：使用 `asyncio.gather()` 来同时运行主循环和定时任务
+- 修改内容：
+  1. 将主循环逻辑移到单独的 `run_main_loop` 函数中
+  2. 在 `main()` 函数中使用 `asyncio.gather()` 并行运行 `run_main_loop` 和 `schedule_market_updates`
+- 预期结果：确保定时任务能够正确执行，不被主循环阻塞
+- 下一步：运行更新后的代码，观察定时推送是否正常工作

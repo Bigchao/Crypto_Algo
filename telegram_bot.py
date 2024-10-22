@@ -409,9 +409,13 @@ async def main():
     bot = Bot(TOKEN)
     logger.info("Starting bot")
     
-    # 启动定时任务
-    asyncio.create_task(schedule_market_updates(bot))
-    
+    # 使用 asyncio.gather 同时运行主循环和定时任务
+    await asyncio.gather(
+        run_main_loop(bot),
+        schedule_market_updates(bot)
+    )
+
+async def run_main_loop(bot):
     offset = 0
     while True:
         try:
