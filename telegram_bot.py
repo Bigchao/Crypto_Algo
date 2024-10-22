@@ -396,13 +396,33 @@ async def send_market_price_update(bot):
     except Exception as e:
         logger.error(f"Error in scheduled market price update: {str(e)}")
 
+async def schedule_market_updates(bot):
+    while True:
+        try:
+            await send_market_price_update(bot)
+        except Exception as e:
+            logger.error(f"Error in schedule_market_updates: {str(e)}")
+        await asyncio.sleep(30)  # 等待30秒
+
 async def main():
     await init_trading_api()
     bot = Bot(TOKEN)
     logger.info("Starting bot")
     
-    # 移除 asyncio.gather 调用，我们稍后会用新的实现替换它
-    await run_main_loop(bot)
+    # 创建并运行两个任务
+    update_task = asyncio.create_task(run_main_loop(bot))
+    market_update_task = asyncio.create_task(schedule_market_updates(bot))
+    
+    try:
+        # 等待两个任务完成（实际上它们会一直运行）
+        await asyncio.gather(update_task, market_update_task)
+    except asyncio.CancelledError:
+        logger.info("Tasks were cancelled")
+    finally:
+        # 确保任务被正确清理
+        update_task.cancel()
+        market_update_task.cancel()
+        await asyncio.gather(update_task, market_update_task, return_exceptions=True)
 
 async def run_main_loop(bot):
     offset = 0
