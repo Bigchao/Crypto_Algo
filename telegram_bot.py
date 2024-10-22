@@ -3,7 +3,6 @@ import os
 import asyncio
 from time import sleep
 from dotenv import load_dotenv
-import aioschedule
 
 # 加载环境变量
 load_dotenv()
@@ -397,23 +396,13 @@ async def send_market_price_update(bot):
     except Exception as e:
         logger.error(f"Error in scheduled market price update: {str(e)}")
 
-async def schedule_market_updates(bot):
-    # 将这行代码从每30分钟改为每30秒
-    aioschedule.every(30).seconds.do(send_market_price_update, bot)
-    while True:
-        await aioschedule.run_pending()
-        await asyncio.sleep(1)
-
 async def main():
     await init_trading_api()
     bot = Bot(TOKEN)
     logger.info("Starting bot")
     
-    # 使用 asyncio.gather 同时运行主循环和定时任务
-    await asyncio.gather(
-        run_main_loop(bot),
-        schedule_market_updates(bot)
-    )
+    # 移除 asyncio.gather 调用，我们稍后会用新的实现替换它
+    await run_main_loop(bot)
 
 async def run_main_loop(bot):
     offset = 0
