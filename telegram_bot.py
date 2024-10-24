@@ -34,7 +34,7 @@ class Context:
 context = Context()
 
 TOP_CRYPTOS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 
-                'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'MATICUSDT']
+                'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'SHIBUSDT']
 AMOUNT_OPTIONS = [50, 100, 500, 1000]  # USDT 金额选项
 CONFIRMATION_CODE = "011626"  # 确认码
 ORDER_TYPES = ['Market', 'Limit']
