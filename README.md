@@ -5,9 +5,9 @@ This bot provides cryptocurrency trading functionalities via Telegram.
 ## Features
 
 - Calculate AHR999 Index
-- Show current market prices
+- Show current market prices for top 12 cryptocurrencies
 - Place orders (market and limit)
-- Scheduled market updates every 30 seconds (for testing, originally every 30 minutes)
+- Scheduled market updates every hour
 
 ## Setup
 
@@ -88,33 +88,10 @@ Start the bot in Telegram and use the provided menu to access different function
 - 成功实现：
   - 移除了 `aioschedule` 依赖
   - 使用 `asyncio` 原生功能重新实现了定时任务
-  - 成功实现了异步推送，每30秒发送一次市场更新
-
-- 下一步可能的改进方向：
-  1. 性能优化：
-     - 监控 CPU 和内存使用情况
-     - 考虑使用缓存机制减少 API 请求频率
-  2. 功能扩展：
-     - 实现用户订阅/取消订阅市场更新功能
-     - 添加更多交易对或自定义交易对选择
-  3. 错误处理和日志：
-     - 增强错误处理机制，添加更详细的日志记录
-     - 实现错误通知机制
-  4. 用户体验改进：
-     - 优化消息格式，使市场更新更易读
-     - 添加图表或可视化元素
-  5. 安全性：
-     - 实现更强大的用户认证机制
-     - 添加交易限额和风险控制措施
-  6. 测试：
-     - 编写单元测试和集成测试
-     - 进行长时间的稳定性测试
-  7. 文档更新：
-     - 更新 README.md
-     - 创建详细的开发文档
-  8. 代码清理：
-     - 检查并移除不再使用的代码或导入
-     - 确保代码风格一致，符合 PEP 8 标准
+  - 成功实现了异步推送，每小时发送一次市场更新
+- 修改：
+  - 将定时更新间隔从30秒改为1小时
+  - 更新了 TOP_CRYPTOS 列表，现在包含12个交易对，包括 SHIBUSDT, SUIUSDT, 和 POLUSDT
 
 ## 未来计划
 
@@ -123,3 +100,11 @@ Start the bot in Telegram and use the provided menu to access different function
 - 改进用户界面和体验
 - 增强安全性和错误处理
 - 完善测试和文档
+
+## 贡献
+
+欢迎提交 pull requests 来改进这个项目。对于重大更改，请先开一个 issue 讨论您想要改变的内容。
+
+## 许可
+
+[MIT](https://choosealicense.com/licenses/mit/)

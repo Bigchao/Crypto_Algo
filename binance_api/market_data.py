@@ -7,7 +7,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 TOP_CRYPTOS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 
-                'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'MATICUSDT']
+                'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'SHIBUSDT',
+                'SUIUSDT', 'POLUSDT']
 
 async def get_top_crypto_data():
     client = await AsyncClient.create()
@@ -48,5 +49,7 @@ async def format_crypto_data(data):
             formatted_data.append(formatted_item)
         except (KeyError, ValueError) as e:
             logger.error(f"Error formatting data for {item.get('symbol', 'Unknown')}: {e}")
+            logger.error(f"Raw item data: {item}")  # 添加这行来记录原始数据
     
+    logger.info(f"Formatted data: {formatted_data}")  # 添加这行来记录所有格式化后的数据
     return formatted_data

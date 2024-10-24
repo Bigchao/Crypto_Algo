@@ -34,7 +34,8 @@ class Context:
 context = Context()
 
 TOP_CRYPTOS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 
-                'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'SHIBUSDT']
+                'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'SHIBUSDT',
+                'SUIUSDT', 'POLUSDT']
 AMOUNT_OPTIONS = [50, 100, 500, 1000]  # USDT 金额选项
 CONFIRMATION_CODE = "011626"  # 确认码
 ORDER_TYPES = ['Market', 'Limit']
@@ -395,6 +396,7 @@ async def send_market_price_update(bot):
         )
     except Exception as e:
         logger.error(f"Error in scheduled market price update: {str(e)}")
+        logger.error(f"Formatted data: {formatted_data}")  # 添加这行来记录格式化后的数据
 
 async def schedule_market_updates(bot):
     while True:
@@ -402,7 +404,7 @@ async def schedule_market_updates(bot):
             await send_market_price_update(bot)
         except Exception as e:
             logger.error(f"Error in schedule_market_updates: {str(e)}")
-        await asyncio.sleep(30)  # 等待30秒
+        await asyncio.sleep(3600)  # 等待3600秒（1小时）
 
 async def main():
     await init_trading_api()
