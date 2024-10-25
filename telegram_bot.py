@@ -3,6 +3,7 @@ import os
 import asyncio
 from time import sleep
 from dotenv import load_dotenv
+from datetime import datetime
 
 # 加载环境变量
 load_dotenv()
@@ -382,7 +383,9 @@ async def send_market_price_update(bot):
         crypto_data = await get_top_crypto_data()
         formatted_data = await format_crypto_data(crypto_data)
         
-        message = "Scheduled Market Update:\n\n"
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        message = f"Scheduled Market Update (as of {current_time}):\n\n"
+        
         for data in formatted_data:
             message += f"{data['symbol']}:\n"
             message += f"Price: ${format_number(data['price'])}\n"
