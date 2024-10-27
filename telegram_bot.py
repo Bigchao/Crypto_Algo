@@ -14,7 +14,7 @@ from telegram.error import NetworkError
 from models.price_prediction import calculate_ahr999, get_current_price
 from models.investment_advice import get_investment_advice
 from binance_api.market_data import get_top_crypto_data, format_crypto_data
-from binance_api.trading import trading_api, init_trading_api
+from binance_api.trading import trading_api, init_trading_api, get_open_orders
 
 # 设置你的bot token
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -37,7 +37,7 @@ context = Context()
 TOP_CRYPTOS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 
                 'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'SHIBUSDT',
                 'SUIUSDT', 'POLUSDT']
-AMOUNT_OPTIONS = [50, 100, 500, 1000]  # USDT 金额选项
+AMOUNT_OPTIONS = [5, 50, 100, 500, 1000]  # USDT 金额选项
 CONFIRMATION_CODE = "011626"  # 确认码
 ORDER_TYPES = ['Market', 'Limit']
 
@@ -50,6 +50,7 @@ def get_main_menu_keyboard():
         [InlineKeyboardButton("Current Market Price", callback_data='market_price')],
         [InlineKeyboardButton("Place Order", callback_data='place_order')],
         [InlineKeyboardButton("Order Status", callback_data='order_status')],
+        [InlineKeyboardButton("Order History", callback_data='order_history')],  # 新增
         [InlineKeyboardButton("Help", callback_data='help')]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -75,6 +76,8 @@ async def button_callback(bot, update):
         await show_order_menu(bot, query)
     elif query.data == 'order_status':
         await show_order_status(bot, query)
+    elif query.data == 'order_history':  # 新增
+        await show_order_history(bot, query)
     elif query.data == 'help':
         await show_help(bot, query)
 
@@ -287,13 +290,18 @@ async def handle_order_confirmation(bot, query):
             amount = context.user_data['amount']
             order_type = context.user_data['order_type']
             
+            logger.info(f"Attempting to place order: symbol={symbol}, side={side}, amount={amount}, type={order_type}")
+            
             if order_type == 'Market':
+                logger.info("Placing market order")
                 order = await trading_api.place_market_order(symbol, side, amount)
             else:  # Limit
                 price = context.user_data['price']
+                logger.info(f"Placing limit order with price: {price}")
                 order = await trading_api.place_limit_order(symbol, side, amount, price)
             
             if order:
+                logger.info(f"Order placed successfully: {order}")
                 await bot.edit_message_text(
                     chat_id=query.message.chat_id,
                     message_id=query.message.message_id,
@@ -301,10 +309,11 @@ async def handle_order_confirmation(bot, query):
                     reply_markup=get_main_menu_keyboard()
                 )
             else:
+                logger.error("Order placement failed: No order returned from API")
                 await bot.edit_message_text(
                     chat_id=query.message.chat_id,
                     message_id=query.message.message_id,
-                    text="Failed to place the order. Please try again later.",
+                    text="Failed to place the order. Please check logs for details.",
                     reply_markup=get_main_menu_keyboard()
                 )
         except Exception as e:
@@ -312,10 +321,11 @@ async def handle_order_confirmation(bot, query):
             await bot.edit_message_text(
                 chat_id=query.message.chat_id,
                 message_id=query.message.message_id,
-                text=f"An error occurred: {str(e)}",
+                text=f"An error occurred while placing the order: {str(e)}",
                 reply_markup=get_main_menu_keyboard()
             )
     else:
+        logger.info("Order cancelled by user")
         await bot.edit_message_text(
             chat_id=query.message.chat_id,
             message_id=query.message.message_id,
@@ -326,11 +336,40 @@ async def handle_order_confirmation(bot, query):
     context.user_data.clear()
 
 async def show_order_status(bot, query):
-    await bot.send_message(
-        chat_id=query.message.chat_id,
-        text="Order status functionality is not implemented yet.",
-        reply_markup=get_main_menu_keyboard()
-    )
+    try:
+        # 假设我们从 Binance API 获取订单状态
+        orders = await trading_api.get_open_orders()
+        
+        if not orders:
+            await bot.send_message(
+                chat_id=query.message.chat_id,
+                text="You have no open orders.",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+
+        message = "Your open orders:\n\n"
+        for order in orders:
+            message += f"Symbol: {order['symbol']}\n"
+            message += f"Order ID: {order['orderId']}\n"
+            message += f"Type: {order['type']}\n"
+            message += f"Side: {order['side']}\n"
+            message += f"Price: {order['price']}\n"
+            message += f"Amount: {order['origQty']}\n"
+            message += f"Status: {order['status']}\n\n"
+
+        await bot.send_message(
+            chat_id=query.message.chat_id,
+            text=message,
+            reply_markup=get_main_menu_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Error in show_order_status: {str(e)}")
+        await bot.send_message(
+            chat_id=query.message.chat_id,
+            text="An error occurred while fetching order status. Please try again later.",
+            reply_markup=get_main_menu_keyboard()
+        )
 
 async def show_help(bot, query):
     help_text = (
@@ -340,6 +379,7 @@ async def show_help(bot, query):
         "- Current Market Price: Check current prices for top 10 cryptocurrencies\n"
         "- Place Order: Place a new order (requires confirmation code)\n"
         "- Order Status: (Coming soon) Check your order status\n"
+        "- Order History: (Coming soon) Check your order history\n"
         "- Help: Show this help message"
     )
     await bot.send_message(
@@ -442,6 +482,54 @@ async def run_main_loop(bot):
         except Exception as e:
             logger.error(f"An error occurred: {str(e)}")
             sleep(1)
+
+async def show_order_history(bot, query):
+    try:
+        orders = await trading_api.get_order_history()
+        
+        if not orders:
+            await bot.send_message(
+                chat_id=query.message.chat_id,
+                text="You have no order history in the last 24 hours.",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+
+        message = "Your order history (last 24 hours):\n\n"
+        for index, order in enumerate(orders, start=1):
+            message += f"{index}. Time: {datetime.fromtimestamp(order['time']/1000).strftime('%Y-%m-%d %H:%M:%S')}\n"
+            message += f"   Symbol: {order['symbol']}\n"
+            message += f"   Type: {order['type']}\n"
+            message += f"   Side: {order['side']}\n"
+            message += f"   Price: {order['price']}\n"
+            message += f"   Amount: {order['origQty']}\n"
+            message += f"   Status: {order['status']}\n\n"
+
+        # 如果消息太长，分割发送
+        if len(message) > 4096:
+            for i in range(0, len(message), 4096):
+                await bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=message[i:i+4096]
+                )
+        else:
+            await bot.send_message(
+                chat_id=query.message.chat_id,
+                text=message
+            )
+        
+        await bot.send_message(
+            chat_id=query.message.chat_id,
+            text="What would you like to do next?",
+            reply_markup=get_main_menu_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Error in show_order_history: {str(e)}")
+        await bot.send_message(
+            chat_id=query.message.chat_id,
+            text="An error occurred while fetching order history. Please try again later.",
+            reply_markup=get_main_menu_keyboard()
+        )
 
 def run_bot():
     logger.info("Starting bot from run_bot function")

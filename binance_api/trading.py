@@ -1,6 +1,8 @@
 from binance.client import AsyncClient
 import os
 from dotenv import load_dotenv
+import logging
+import time
 
 # 加载环境变量
 load_dotenv()
@@ -62,6 +64,31 @@ class TradingAPI:
         except Exception as e:
             print(f"Error placing limit order: {e}")
             return None
+
+    async def get_open_orders(self):
+        try:
+            orders = await self.client.get_open_orders()
+            return orders
+        except Exception as e:
+            logging.error(f"Error fetching open orders: {str(e)}")
+            return []
+
+    async def get_order_history(self, symbol=None):
+        try:
+            # 如果没有指定symbol，则获取所有交易对的订单历史
+            if symbol is None:
+                orders = await self.client.get_all_orders()
+            else:
+                orders = await self.client.get_orders(symbol=symbol)
+            
+            # 过滤最近24小时的订单
+            current_time = int(time.time() * 1000)  # 转换为毫秒
+            recent_orders = [order for order in orders if current_time - order['time'] <= 24 * 60 * 60 * 1000]
+            
+            return recent_orders
+        except Exception as e:
+            logging.error(f"Error fetching order history: {str(e)}")
+            return []
 
 trading_api = TradingAPI()
 
