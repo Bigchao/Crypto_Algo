@@ -14,7 +14,7 @@ from telegram.error import NetworkError
 from models.price_prediction import calculate_ahr999, get_current_price
 from models.investment_advice import get_investment_advice
 from binance_api.market_data import get_top_crypto_data, format_crypto_data
-from binance_api.trading import trading_api, init_trading_api, get_open_orders
+from binance_api.trading import trading_api, init_trading_api
 
 # 设置你的bot token
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -337,7 +337,7 @@ async def handle_order_confirmation(bot, query):
 
 async def show_order_status(bot, query):
     try:
-        # 假设我们从 Binance API 获取订单状态
+        # 使用 trading_api 实例调用 get_open_orders 方法
         orders = await trading_api.get_open_orders()
         
         if not orders:
@@ -431,7 +431,7 @@ async def send_market_price_update(bot):
             message += f"Price: ${format_number(data['price'])}\n"
             message += f"24h Change: {format_number(data['change'], 2)}%\n\n"
 
-        # 这里应该从数据库或某个存储中获取订阅用户的列表
+        # 这里应该从数据库或某个存储中获取订阅用户的列
         # 暂时我们只发送给授权用户
         await bot.send_message(
             chat_id=AUTHORIZED_USER_ID,
@@ -497,13 +497,18 @@ async def show_order_history(bot, query):
 
         message = "Your order history (last 24 hours):\n\n"
         for index, order in enumerate(orders, start=1):
-            message += f"{index}. Time: {datetime.fromtimestamp(order['time']/1000).strftime('%Y-%m-%d %H:%M:%S')}\n"
-            message += f"   Symbol: {order['symbol']}\n"
-            message += f"   Type: {order['type']}\n"
-            message += f"   Side: {order['side']}\n"
-            message += f"   Price: {order['price']}\n"
-            message += f"   Amount: {order['origQty']}\n"
-            message += f"   Status: {order['status']}\n\n"
+            try:
+                message += f"{index}. Time: {datetime.fromtimestamp(order.get('time', 0)/1000).strftime('%Y-%m-%d %H:%M:%S')}\n"
+                message += f"   Symbol: {order.get('symbol', 'N/A')}\n"
+                message += f"   Type: {order.get('type', 'N/A')}\n"
+                message += f"   Side: {order.get('side', 'N/A')}\n"
+                message += f"   Price: {order.get('price', 'N/A')}\n"
+                message += f"   Amount: {order.get('origQty', 'N/A')}\n"
+                message += f"   Status: {order.get('status', 'N/A')}\n\n"
+            except Exception as e:
+                logger.error(f"Error processing order {index}: {str(e)}")
+                logger.error(f"Order data: {order}")
+                message += f"{index}. Error processing this order\n\n"
 
         # 如果消息太长，分割发送
         if len(message) > 4096:
@@ -525,6 +530,7 @@ async def show_order_history(bot, query):
         )
     except Exception as e:
         logger.error(f"Error in show_order_history: {str(e)}")
+        logger.error(f"Orders data: {orders}")
         await bot.send_message(
             chat_id=query.message.chat_id,
             text="An error occurred while fetching order history. Please try again later.",
