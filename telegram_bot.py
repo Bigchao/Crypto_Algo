@@ -14,7 +14,7 @@ from telegram.error import NetworkError
 from models.price_prediction import calculate_ahr999, get_current_price
 from models.investment_advice import get_investment_advice
 from binance_api.market_data import get_top_crypto_data, format_crypto_data
-from binance_api.trading import trading_api, init_trading_api
+from binance_api import trading_api, init_trading_api
 
 # 设置你的bot token
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -50,7 +50,7 @@ def get_main_menu_keyboard():
         [InlineKeyboardButton("Current Market Price", callback_data='market_price')],
         [InlineKeyboardButton("Place Order", callback_data='place_order')],
         [InlineKeyboardButton("Order Status", callback_data='order_status')],
-        [InlineKeyboardButton("Order History", callback_data='order_history')],  # 新增
+        [InlineKeyboardButton("Order History", callback_data='order_history')],  # 增
         [InlineKeyboardButton("Help", callback_data='help')]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -65,21 +65,31 @@ async def start(bot, update):
     )
 
 async def button_callback(bot, update):
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == 'calculate_ahr999':
-        await calculate_ahr999_index(bot, query)
-    elif query.data == 'market_price':
-        await show_market_price(bot, query)
-    elif query.data == 'place_order':
-        await show_order_menu(bot, query)
-    elif query.data == 'order_status':
-        await show_order_status(bot, query)
-    elif query.data == 'order_history':  # 新增
-        await show_order_history(bot, query)
-    elif query.data == 'help':
-        await show_help(bot, query)
+    try:
+        logger.info("Entering button_callback function")
+        logger.info(f"Update type: {type(update)}")
+        logger.info(f"Update content: {update.to_dict()}")
+        
+        query = update.callback_query
+        logger.info(f"Query data: {query.data}")
+        
+        await query.answer()
+        
+        if query.data == 'calculate_ahr999':
+            await calculate_ahr999_index(bot, query)
+        elif query.data == 'market_price':
+            await show_market_price(bot, query)
+        elif query.data == 'place_order':
+            await show_order_menu(bot, query)
+        elif query.data == 'order_status':
+            await show_order_status(bot, query)
+        elif query.data == 'order_history':  # 新增
+            await show_order_history(bot, query)
+        elif query.data == 'help':
+            await show_help(bot, query)
+    except Exception as e:
+        logger.error(f"Error in button_callback: {str(e)}")
+        logger.error("Full error details:", exc_info=True)
 
 async def calculate_ahr999_index(bot, query):
     try:
@@ -202,20 +212,40 @@ async def handle_order_type_selection(bot, query):
     )
 
 async def handle_order_selection(bot, query):
-    _, symbol, side = query.data.split('_')
-    context.user_data['symbol'] = symbol
-    context.user_data['side'] = side
-    
-    # 创建一个包含金额选项的键盘
-    keyboard = [[InlineKeyboardButton(f"{amount} USDT", callback_data=f'amount_{amount}')] for amount in AMOUNT_OPTIONS]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await bot.edit_message_text(
-        chat_id=query.message.chat_id,
-        message_id=query.message.message_id,
-        text=f"Selected: {symbol} {side}\nPlease select the amount:",
-        reply_markup=reply_markup
-    )
+    try:
+        parts = query.data.split('_')
+        logger.info(f"Order selection parts: {parts}")  # 添加日志
+        
+        if len(parts) >= 3:
+            _, symbol, side = parts
+            context.user_data['symbol'] = symbol
+            context.user_data['side'] = side
+            
+            # 创建一个包含金额选项的键盘
+            keyboard = [[InlineKeyboardButton(f"{amount} USDT", callback_data=f'amount_{amount}')] for amount in AMOUNT_OPTIONS]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await bot.edit_message_text(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                text=f"Selected: {symbol} {side}\nPlease select the amount:",
+                reply_markup=reply_markup
+            )
+        else:
+            logger.error(f"Invalid order selection format: {query.data}")
+            await bot.send_message(
+                chat_id=query.message.chat_id,
+                text="Invalid order selection. Please try again.",
+                reply_markup=get_main_menu_keyboard()
+            )
+    except Exception as e:
+        logger.error(f"Error in handle_order_selection: {str(e)}")
+        logger.error(f"Query data: {query.data}")
+        await bot.send_message(
+            chat_id=query.message.chat_id,
+            text="An error occurred while processing your selection. Please try again.",
+            reply_markup=get_main_menu_keyboard()
+        )
 
 async def handle_amount_selection(bot, query):
     amount = float(query.data.split('_')[1])
@@ -393,30 +423,45 @@ async def handle_message(bot, update):
     await start(bot, update)
 
 async def process_update(bot, update):
-    user_id = update.effective_user.id
-    if update.message:
-        if update.message.text == '/start':
-            await start(bot, update)
-        elif context.user_data.get('state') == 'waiting_for_confirmation_code':
-            await handle_confirmation_code(bot, update.message)
-        elif context.user_data.get('state') == 'waiting_for_limit_price':
-            await handle_limit_price_input(bot, update.message)
-        else:
-            await handle_message(bot, update)
-    elif update.callback_query:
-        query = update.callback_query
-        if query.data == 'place_order':
-            await show_order_menu(bot, query)
-        elif query.data.startswith('order_type_'):
-            await handle_order_type_selection(bot, query)
-        elif query.data.startswith('order_'):
-            await handle_order_selection(bot, query)
-        elif query.data.startswith('amount_'):
-            await handle_amount_selection(bot, query)
-        elif query.data in ['confirm_order', 'cancel_order']:
-            await handle_order_confirmation(bot, query)
-        else:
-            await button_callback(bot, update)
+    try:
+        user_id = update.effective_user.id
+        logger.info("="*50)
+        logger.info(f"Processing update from user {user_id}")
+        logger.info(f"Update type: {type(update)}")
+        
+        if update.callback_query:
+            query = update.callback_query
+            logger.info(f"Callback query data: {query.data}")
+            
+            # 首先处理不需要分割的简单回调
+            if query.data in ['calculate_ahr999', 'market_price', 'place_order', 
+                            'order_status', 'order_history', 'help']:
+                logger.info(f"Processing simple callback: {query.data}")
+                await button_callback(bot, update)
+                return
+            
+            # 然后处理需要分割的复杂回调
+            if '_' in query.data:
+                parts = query.data.split('_')
+                logger.info(f"Split callback data parts: {parts}")
+                
+                if query.data.startswith('order_type_'):
+                    await handle_order_type_selection(bot, query)
+                elif query.data.startswith('amount_'):
+                    await handle_amount_selection(bot, query)
+                elif len(parts) == 3 and parts[0] == 'order':  # 只在确实需要3个部分时处理
+                    await handle_order_selection(bot, query)
+                else:
+                    logger.warning(f"Unhandled complex callback: {query.data}")
+                    # 对于其他带下划线的回调，回退到基本处理
+                    await button_callback(bot, update)
+                    
+    except Exception as e:
+        logger.error("="*50)
+        logger.error(f"Error in process_update: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error("Full error details:", exc_info=True)
+        logger.error("="*50)
 
 async def send_market_price_update(bot):
     try:
@@ -485,9 +530,12 @@ async def run_main_loop(bot):
 
 async def show_order_history(bot, query):
     try:
+        print("Starting to fetch order history...")  # 新增
         orders = await trading_api.get_order_history()
+        print(f"Received orders: {orders}")  # 新增
         
         if not orders:
+            print("No orders found")  # 新增
             await bot.send_message(
                 chat_id=query.message.chat_id,
                 text="You have no order history in the last 24 hours.",
@@ -498,6 +546,7 @@ async def show_order_history(bot, query):
         message = "Your order history (last 24 hours):\n\n"
         for index, order in enumerate(orders, start=1):
             try:
+                print(f"Processing order {index}: {order}")  # 新增
                 message += f"{index}. Time: {datetime.fromtimestamp(order.get('time', 0)/1000).strftime('%Y-%m-%d %H:%M:%S')}\n"
                 message += f"   Symbol: {order.get('symbol', 'N/A')}\n"
                 message += f"   Type: {order.get('type', 'N/A')}\n"
@@ -506,6 +555,8 @@ async def show_order_history(bot, query):
                 message += f"   Amount: {order.get('origQty', 'N/A')}\n"
                 message += f"   Status: {order.get('status', 'N/A')}\n\n"
             except Exception as e:
+                print(f"Error processing order {index}: {e}")  # 新增
+                print(f"Order data: {order}")  # 新增
                 logger.error(f"Error processing order {index}: {str(e)}")
                 logger.error(f"Order data: {order}")
                 message += f"{index}. Error processing this order\n\n"
