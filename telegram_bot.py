@@ -431,17 +431,24 @@ async def process_update(bot, update):
         
         if update.callback_query:
             query = update.callback_query
-            logger.info(f"Callback query data: {query.data}")
+            logger.info(f"Received callback query with data: {query.data}")
             
-            # 首先处理不需要分割的简单回调
+            # 检查是否是 order_history
+            if query.data == 'order_history':
+                logger.info("Detected order_history callback")
+                await show_order_history(bot, query)
+                return
+                
+            # 其他简单回调
             if query.data in ['calculate_ahr999', 'market_price', 'place_order', 
-                            'order_status', 'order_history', 'help']:
+                            'order_status', 'help']:
                 logger.info(f"Processing simple callback: {query.data}")
                 await button_callback(bot, update)
                 return
             
-            # 然后处理需要分割的复杂回调
+            # 复杂回调处理
             if '_' in query.data:
+                logger.info(f"Processing complex callback: {query.data}")
                 parts = query.data.split('_')
                 logger.info(f"Split callback data parts: {parts}")
                 
@@ -449,13 +456,11 @@ async def process_update(bot, update):
                     await handle_order_type_selection(bot, query)
                 elif query.data.startswith('amount_'):
                     await handle_amount_selection(bot, query)
-                elif len(parts) == 3 and parts[0] == 'order':  # 只在确实需要3个部分时处理
+                elif len(parts) == 3 and parts[0] == 'order':
                     await handle_order_selection(bot, query)
                 else:
                     logger.warning(f"Unhandled complex callback: {query.data}")
-                    # 对于其他带下划线的回调，回退到基本处理
-                    await button_callback(bot, update)
-                    
+            
     except Exception as e:
         logger.error("="*50)
         logger.error(f"Error in process_update: {str(e)}")
