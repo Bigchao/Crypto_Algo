@@ -428,7 +428,48 @@ async def process_update(bot, update):
         logger.info("="*50)
         logger.info(f"Processing update from user {user_id}")
         logger.info(f"Update type: {type(update)}")
+        logger.info(f"Update content: {update.to_dict()}")
         
+        # 确保每个用户有自己的状态
+        if user_id not in context.user_data:
+            context.user_data[user_id] = {'state': None}
+        
+        # 处理消息更新
+        if update.message:
+            logger.info(f"Received message: {update.message.text}")
+            logger.info(f"Message type: {type(update.message)}")
+            
+            # 如果是 /start 命令
+            if update.message.text == '/start':
+                logger.info("Processing /start command")
+                context.user_data[user_id]['state'] = None  # 重置状态
+                await start(bot, update)
+                return
+            
+            # 检查用户状态
+            current_state = context.user_data[user_id].get('state')
+            logger.info(f"Current user state: {current_state}")
+            
+            if current_state == 'waiting_for_confirmation_code':
+                logger.info("Processing confirmation code")
+                await handle_confirmation_code(bot, update.message)
+            elif current_state == 'waiting_for_limit_price':
+                logger.info("Processing limit price input")
+                await handle_limit_price_input(bot, update.message)
+            else:
+                logger.info("Sending menu prompt message")
+                try:
+                    await bot.send_message(
+                        chat_id=update.message.chat_id,
+                        text="Please use the menu buttons below to interact with the bot.",
+                        reply_markup=get_main_menu_keyboard()
+                    )
+                    logger.info("Menu prompt message sent successfully")
+                except Exception as e:
+                    logger.error(f"Error sending menu prompt: {str(e)}")
+            return
+            
+        # 处理回调查询（按钮点击）
         if update.callback_query:
             query = update.callback_query
             logger.info(f"Received callback query with data: {query.data}")
