@@ -457,16 +457,9 @@ async def process_update(bot, update):
                 logger.info("Processing limit price input")
                 await handle_limit_price_input(bot, update.message)
             else:
-                logger.info("Sending menu prompt message")
-                try:
-                    await bot.send_message(
-                        chat_id=update.message.chat_id,
-                        text="Please use the menu buttons below to interact with the bot.",
-                        reply_markup=get_main_menu_keyboard()
-                    )
-                    logger.info("Menu prompt message sent successfully")
-                except Exception as e:
-                    logger.error(f"Error sending menu prompt: {str(e)}")
+                # 默认情况下，显示主菜单
+                logger.info("No specific state, showing main menu")
+                await start(bot, update)
             return
             
         # 处理回调查询（按钮点击）
