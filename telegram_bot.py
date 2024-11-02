@@ -38,7 +38,9 @@ TOP_CRYPTOS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT',
                 'DOGEUSDT', 'SOLUSDT', 'TRXUSDT', 'DOTUSDT', 'SHIBUSDT',
                 'SUIUSDT', 'POLUSDT']
 AMOUNT_OPTIONS = [5, 50, 100, 500, 1000]  # USDT 金额选项
-CONFIRMATION_CODE = "011626"  # 确认码
+
+# 从环境变量中获取验证码
+CONFIRMATION_CODE = os.getenv('CONFIRMATION_CODE')
 ORDER_TYPES = ['Market', 'Limit']
 
 def is_authorized(user_id):
@@ -66,27 +68,15 @@ async def start(bot, update):
 
 async def button_callback(bot, update):
     try:
-        logger.info("Entering button_callback function")
-        logger.info(f"Update type: {type(update)}")
-        logger.info(f"Update content: {update.to_dict()}")
-        
         query = update.callback_query
-        logger.info(f"Query data: {query.data}")
+        logger.info("="*50)
+        logger.info(f"[button_callback] Starting with data: {query.data}")
+        logger.info(f"[button_callback] User ID: {query.from_user.id}")
+        logger.info(f"[button_callback] Current context: {context.user_data}")
         
-        await query.answer()
-        
-        if query.data == 'calculate_ahr999':
-            await calculate_ahr999_index(bot, query)
-        elif query.data == 'market_price':
-            await show_market_price(bot, query)
-        elif query.data == 'place_order':
+        if query.data == 'place_order':
+            logger.info("[button_callback] Detected place_order command")
             await show_order_menu(bot, query)
-        elif query.data == 'order_status':
-            await show_order_status(bot, query)
-        elif query.data == 'order_history':  # 新增
-            await show_order_history(bot, query)
-        elif query.data == 'help':
-            await show_help(bot, query)
     except Exception as e:
         logger.error(f"Error in button_callback: {str(e)}")
         logger.error("Full error details:", exc_info=True)
@@ -159,11 +149,24 @@ async def show_market_price(bot, query):
         )
 
 async def show_order_menu(bot, query):
+    user_id = query.from_user.id
+    logger.info("="*50)
+    logger.info(f"[show_order_menu] Starting for user {user_id}")
+    logger.info(f"[show_order_menu] Context data before: {context.user_data}")
+    logger.info(f"[show_order_menu] User state before: {context.user_data.get(user_id, {}).get('state')}")
+    
+    if user_id not in context.user_data:
+        logger.info(f"[show_order_menu] Creating new user data for {user_id}")
+        context.user_data[user_id] = {}
+    context.user_data[user_id]['state'] = 'waiting_for_confirmation_code'
+    
+    logger.info(f"[show_order_menu] Context data after: {context.user_data}")
+    logger.info(f"[show_order_menu] User state after: {context.user_data[user_id]['state']}")
+    
     if not is_authorized(query.from_user.id):
         await bot.answer_callback_query(query.id, text="You are not authorized to place orders.")
         return
 
-    context.user_data['state'] = 'waiting_for_confirmation_code'
     await bot.edit_message_text(
         chat_id=query.message.chat_id,
         message_id=query.message.message_id,
@@ -171,6 +174,22 @@ async def show_order_menu(bot, query):
     )
 
 async def handle_confirmation_code(bot, message):
+    user_id = message.from_user.id
+    logger.info("="*50)
+    logger.info(f"[handle_confirmation_code] Starting for user {user_id}")
+    logger.info(f"[handle_confirmation_code] Input code: {message.text}")
+    logger.info(f"[handle_confirmation_code] Context data: {context.user_data}")
+    logger.info(f"[handle_confirmation_code] User state: {context.user_data.get(user_id, {}).get('state')}")
+    logger.info(f"Input code: {message.text}, Expected code: {CONFIRMATION_CODE}")
+    logger.info(f"User state before handling: {context.user_data.get(user_id, {}).get('state')}")
+    logger.info(f"Full context data: {context.user_data}")
+    
+    # 检查用户状态是否正确
+    current_state = context.user_data.get(user_id, {}).get('state')
+    if current_state != 'waiting_for_confirmation_code':
+        logger.info(f"Unexpected state: {current_state}, expected: waiting_for_confirmation_code")
+        return
+    
     if message.text == CONFIRMATION_CODE:
         keyboard = [
             [InlineKeyboardButton(f"{order_type} Order", callback_data=f'order_type_{order_type}') for order_type in ORDER_TYPES]
@@ -181,14 +200,16 @@ async def handle_confirmation_code(bot, message):
             text="Confirmation code correct. Please select order type:",
             reply_markup=reply_markup
         )
-        context.user_data['state'] = 'selecting_order_type'
+        context.user_data[user_id]['state'] = 'selecting_order_type'
+        logger.info(f"State updated to: {context.user_data[user_id]['state']}")
     else:
         await bot.send_message(
             chat_id=message.chat_id,
             text="Invalid confirmation code. Order process cancelled.",
             reply_markup=get_main_menu_keyboard()
         )
-        context.user_data.clear()
+        # 只清除状态，不清除整个用户数据
+        context.user_data[user_id]['state'] = None
 
 async def handle_order_type_selection(bot, query):
     order_type = query.data.split('_')[2]
@@ -426,65 +447,47 @@ async def process_update(bot, update):
     try:
         user_id = update.effective_user.id
         logger.info("="*50)
-        logger.info(f"Processing update from user {user_id}")
-        logger.info(f"Update type: {type(update)}")
-        logger.info(f"Update content: {update.to_dict()}")
+        logger.info(f"[process_update] Starting for user {user_id}")
+        logger.info(f"[process_update] Update type: {type(update)}")
+        logger.info(f"[process_update] Full update: {update.to_dict()}")
+        logger.info(f"[process_update] Context data: {context.user_data}")
         
-        # 确保每个用户有自己的状态
-        if user_id not in context.user_data:
-            context.user_data[user_id] = {'state': None}
-        
-        # 处理消息更新
-        if update.message:
-            logger.info(f"Received message: {update.message.text}")
-            logger.info(f"Message type: {type(update.message)}")
-            
-            # 如果是 /start 命令
-            if update.message.text == '/start':
-                logger.info("Processing /start command")
-                context.user_data[user_id]['state'] = None  # 重置状态
-                await start(bot, update)
-                return
-            
-            # 检查用户状态
-            current_state = context.user_data[user_id].get('state')
-            logger.info(f"Current user state: {current_state}")
-            
-            if current_state == 'waiting_for_confirmation_code':
-                logger.info("Processing confirmation code")
-                await handle_confirmation_code(bot, update.message)
-            elif current_state == 'waiting_for_limit_price':
-                logger.info("Processing limit price input")
-                await handle_limit_price_input(bot, update.message)
-            else:
-                # 默认情况下，显示主菜单
-                logger.info("No specific state, showing main menu")
-                await start(bot, update)
-            return
-            
         # 处理回调查询（按钮点击）
         if update.callback_query:
             query = update.callback_query
-            logger.info(f"Received callback query with data: {query.data}")
+            logger.info(f"[process_update] Received callback query with data: {query.data}")
             
-            # 检查是否是 order_history
-            if query.data == 'order_history':
-                logger.info("Detected order_history callback")
+            # 处理各种回调
+            if query.data == 'place_order':
+                logger.info("[process_update] Handling place_order")
+                await show_order_menu(bot, query)
+                return
+            elif query.data == 'order_history':
+                logger.info("[process_update] Handling order_history")
                 await show_order_history(bot, query)
                 return
-                
-            # 其他简单回调
-            if query.data in ['calculate_ahr999', 'market_price', 'place_order', 
-                            'order_status', 'help']:
-                logger.info(f"Processing simple callback: {query.data}")
-                await button_callback(bot, update)
+            elif query.data == 'calculate_ahr999':
+                logger.info("[process_update] Handling calculate_ahr999")
+                await calculate_ahr999_index(bot, query)
+                return
+            elif query.data == 'market_price':
+                logger.info("[process_update] Handling market_price")
+                await show_market_price(bot, query)
+                return
+            elif query.data == 'order_status':
+                logger.info("[process_update] Handling order_status")
+                await show_order_status(bot, query)
+                return
+            elif query.data == 'help':
+                logger.info("[process_update] Handling help")
+                await show_help(bot, query)
                 return
             
-            # 复杂回调处理
+            # 处理复杂回调
             if '_' in query.data:
-                logger.info(f"Processing complex callback: {query.data}")
+                logger.info(f"[process_update] Processing complex callback: {query.data}")
                 parts = query.data.split('_')
-                logger.info(f"Split callback data parts: {parts}")
+                logger.info(f"[process_update] Split callback data parts: {parts}")
                 
                 if query.data.startswith('order_type_'):
                     await handle_order_type_selection(bot, query)
@@ -492,9 +495,29 @@ async def process_update(bot, update):
                     await handle_amount_selection(bot, query)
                 elif len(parts) == 3 and parts[0] == 'order':
                     await handle_order_selection(bot, query)
+                elif query.data in ['confirm_order', 'cancel_order']:
+                    await handle_order_confirmation(bot, query)
                 else:
-                    logger.warning(f"Unhandled complex callback: {query.data}")
+                    logger.warning(f"[process_update] Unhandled complex callback: {query.data}")
+        
+        # 处理消息
+        if update.message:
+            logger.info(f"[process_update] Message text: {update.message.text}")
+            current_state = context.user_data.get(user_id, {}).get('state')
+            logger.info(f"[process_update] Current state: {current_state}")
             
+            if current_state == 'waiting_for_confirmation_code':
+                logger.info("[process_update] Handling confirmation code")
+                await handle_confirmation_code(bot, update.message)
+                return
+            elif current_state == 'waiting_for_limit_price':
+                logger.info("[process_update] Handling limit price input")
+                await handle_limit_price_input(bot, update.message)
+                return
+            else:
+                logger.info(f"[process_update] No specific state, showing main menu")
+                await start(bot, update)
+                
     except Exception as e:
         logger.error("="*50)
         logger.error(f"Error in process_update: {str(e)}")
@@ -516,14 +539,14 @@ async def send_market_price_update(bot):
             message += f"24h Change: {format_number(data['change'], 2)}%\n\n"
 
         # 这里应该从数据库或某个存储中获取订阅用户的列
-        # 暂时我们只发送给授权用户
+        # 暂时我们只发送给授用户
         await bot.send_message(
             chat_id=AUTHORIZED_USER_ID,
             text=message
         )
     except Exception as e:
         logger.error(f"Error in scheduled market price update: {str(e)}")
-        logger.error(f"Formatted data: {formatted_data}")  # 添加这行来记录格式化后的数据
+        logger.error(f"Formatted data: {formatted_data}")  # 添加这行来记录格化后的数据
 
 async def schedule_market_updates(bot):
     while True:
