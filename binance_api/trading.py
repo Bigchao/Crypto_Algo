@@ -73,33 +73,6 @@ class TradingAPI:
             logging.error(f"Error fetching open orders: {str(e)}")
             return []
 
-    async def get_order_history(self, symbol=None):
-        try:
-            logging.info("Starting to fetch order history")
-            
-            # 如果没有指定symbol，则获取所有交易对的订单历史
-            if symbol is None:
-                logging.info("Fetching all orders history")
-                orders = await self.client.get_all_orders()
-            else:
-                logging.info(f"Fetching orders history for symbol: {symbol}")
-                orders = await self.client.get_orders(symbol=symbol)
-            
-            logging.info(f"Raw orders data received: {orders}")
-            
-            # 过滤最近24小时的订单
-            current_time = int(time.time() * 1000)  # 转换为毫秒
-            recent_orders = [order for order in orders if current_time - order['time'] <= 24 * 60 * 60 * 1000]
-            
-            logging.info(f"Filtered recent orders: {recent_orders}")
-            
-            return recent_orders
-        except Exception as e:
-            logging.error(f"Error fetching order history: {str(e)}")
-            logging.error(f"Error type: {type(e)}")
-            logging.error(f"Error details: {str(e)}")
-            return []
-
 trading_api = TradingAPI()
 
 async def init_trading_api():

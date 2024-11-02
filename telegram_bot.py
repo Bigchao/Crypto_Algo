@@ -15,6 +15,7 @@ from models.price_prediction import calculate_ahr999, get_current_price
 from models.investment_advice import get_investment_advice
 from binance_api.market_data import get_top_crypto_data, format_crypto_data
 from binance_api import trading_api, init_trading_api
+from binance_api.order_management import OrderManagement
 
 # 设置你的bot token
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -539,7 +540,7 @@ async def send_market_price_update(bot):
             message += f"24h Change: {format_number(data['change'], 2)}%\n\n"
 
         # 这里应该从数据库或某个存储中获取订阅用户的列
-        # 暂时我们只发送给授用户
+        # 暂时们只给授用户
         await bot.send_message(
             chat_id=AUTHORIZED_USER_ID,
             text=message
@@ -590,60 +591,51 @@ async def run_main_loop(bot):
             logger.error(f"An error occurred: {str(e)}")
             sleep(1)
 
+order_manager = OrderManagement(api_key=os.getenv('BINANCE_API_KEY'), api_secret=os.getenv('BINANCE_SECRET_KEY'))
+
 async def show_order_history(bot, query):
     try:
-        print("Starting to fetch order history...")  # 新增
-        orders = await trading_api.get_order_history()
-        print(f"Received orders: {orders}")  # 新增
+        orders_by_symbol = await order_manager.get_order_history()
         
-        if not orders:
-            print("No orders found")  # 新增
+        if not orders_by_symbol:
             await bot.send_message(
                 chat_id=query.message.chat_id,
-                text="You have no order history in the last 24 hours.",
+                text="No order history found in the last 24 hours.",
                 reply_markup=get_main_menu_keyboard()
             )
             return
 
         message = "Your order history (last 24 hours):\n\n"
-        for index, order in enumerate(orders, start=1):
-            try:
-                print(f"Processing order {index}: {order}")  # 新增
-                message += f"{index}. Time: {datetime.fromtimestamp(order.get('time', 0)/1000).strftime('%Y-%m-%d %H:%M:%S')}\n"
-                message += f"   Symbol: {order.get('symbol', 'N/A')}\n"
-                message += f"   Type: {order.get('type', 'N/A')}\n"
-                message += f"   Side: {order.get('side', 'N/A')}\n"
-                message += f"   Price: {order.get('price', 'N/A')}\n"
-                message += f"   Amount: {order.get('origQty', 'N/A')}\n"
-                message += f"   Status: {order.get('status', 'N/A')}\n\n"
-            except Exception as e:
-                print(f"Error processing order {index}: {e}")  # 新增
-                print(f"Order data: {order}")  # 新增
-                logger.error(f"Error processing order {index}: {str(e)}")
-                logger.error(f"Order data: {order}")
-                message += f"{index}. Error processing this order\n\n"
+        
+        # 使用 TOP_CRYPTOS 替代 COMMON_SYMBOLS
+        for symbol in TOP_CRYPTOS:
+            if symbol in orders_by_symbol and orders_by_symbol[symbol]:
+                message += f"=== {symbol} ===\n"
+                for order in orders_by_symbol[symbol]:
+                    message += f"Order ID: {order['orderId']}\n"
+                    message += f"Type: {order['type']}\n"
+                    message += f"Side: {order['side']}\n"
+                    message += f"Price: {order['price']}\n"
+                    message += f"Amount: {order['origQty']}\n"
+                    message += f"Status: {order['status']}\n"
+                    message += f"Time: {datetime.fromtimestamp(order['time']/1000).strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-        # 如果消息太长，分割发送
+        # 如果消息太长,分段发送
         if len(message) > 4096:
-            for i in range(0, len(message), 4096):
+            messages = [message[i:i+4096] for i in range(0, len(message), 4096)]
+            for msg in messages:
                 await bot.send_message(
                     chat_id=query.message.chat_id,
-                    text=message[i:i+4096]
+                    text=msg
                 )
         else:
             await bot.send_message(
                 chat_id=query.message.chat_id,
-                text=message
+                text=message,
+                reply_markup=get_main_menu_keyboard()
             )
-        
-        await bot.send_message(
-            chat_id=query.message.chat_id,
-            text="What would you like to do next?",
-            reply_markup=get_main_menu_keyboard()
-        )
     except Exception as e:
         logger.error(f"Error in show_order_history: {str(e)}")
-        logger.error(f"Orders data: {orders}")
         await bot.send_message(
             chat_id=query.message.chat_id,
             text="An error occurred while fetching order history. Please try again later.",
