@@ -1,13 +1,21 @@
 import os
 import sys
-
-# 获取当前文件的目录
-current_dir = os.path.dirname(os.path.abspath(__file__))
-# 将项目根目录添加到 Python 路径
-sys.path.insert(0, current_dir)
-
+import logging
 from telegram_bot import run_bot
 
+# 设置日志
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+logger = logging.getLogger(__name__)
+
 if __name__ == '__main__':
-    run_bot()
+    try:
+        logger.info("Starting bot from main.py")
+        run_bot()
+    except Exception as e:
+        logger.error(f"Error starting bot: {str(e)}")
+        logger.error("Full error details:", exc_info=True)
 
