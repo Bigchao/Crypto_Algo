@@ -115,3 +115,8 @@ celerybeat-schedule
 # outputs
 *.csv
 *.json
+
+
+# 在 .gitignore 文件中添加
+*.h5
+tick_data/
