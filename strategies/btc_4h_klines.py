@@ -12,13 +12,19 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-class BTC4HKlines:
-    def __init__(self):
+class BTCKlines:
+    def __init__(self, interval='4h'):
+        """
+        初始化K线数据获取类
+        
+        Args:
+            interval (str): K线时间间隔，例如：'30m', '1h', '2h', '4h', '1d' 等
+        """
         self.api_key = os.getenv('BINANCE_API_KEY')
         self.api_secret = os.getenv('BINANCE_SECRET_KEY')
         self.client = None
         self.symbol = 'BTCUSDT'
-        self.interval = '4h'
+        self.interval = interval
         self.data_folder = 'kline_data'
         
     async def initialize(self):
@@ -43,9 +49,9 @@ class BTC4HKlines:
             await self.client.close_connection()
 
     async def fetch_klines(self):
-        """获取所有4小时K线数据"""
+        """获取指定时间间隔的K线数据"""
         try:
-            logger.info(f"Fetching 4h klines for {self.symbol}")
+            logger.info(f"Fetching {self.interval} klines for {self.symbol}")
             
             # 获取最早的可用数据
             klines = await self.client.get_historical_klines(
@@ -72,7 +78,8 @@ class BTC4HKlines:
     def save_klines_to_hdf5(self, klines):
         """保存K线数据到HDF5文件"""
         try:
-            filename = f"{self.symbol}_4h_klines.h5"
+            # 文件名包含时间间隔
+            filename = f"{self.symbol}_{self.interval}_klines.h5"
             filepath = os.path.join(self.data_folder, filename)
             
             # 将数据转换为DataFrame
@@ -109,14 +116,18 @@ class BTC4HKlines:
 
 async def main():
     """主函数"""
-    klines = BTC4HKlines()
+    # 可以指定不同的时间间隔
+    intervals = ['30m', '1h', '2h', '4h']
     
-    if await klines.initialize():
-        await klines.fetch_klines()
-        await klines.close()
-    else:
-        logger.error("Failed to initialize")
+    for interval in intervals:
+        klines = BTCKlines(interval=interval)
+        if await klines.initialize():
+            logger.info(f"Fetching {interval} klines...")
+            await klines.fetch_klines()
+            await klines.close()
+        else:
+            logger.error(f"Failed to initialize for {interval} interval")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(main()) 
+    asyncio.run(main())
