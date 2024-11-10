@@ -1,178 +1,356 @@
 import logging
-from binance.client import AsyncClient
-from binance.exceptions import BinanceAPIException
-from datetime import datetime, timedelta
-import pandas as pd
-import os
-from dotenv import load_dotenv
-import asyncio
-
-# 加载环境变量
-load_dotenv()
+import backtrader as bt
 
 logger = logging.getLogger(__name__)
 
-class TurtleTrading:
-    def __init__(self):
-        self.api_key = os.getenv('BINANCE_API_KEY')
-        self.api_secret = os.getenv('BINANCE_SECRET_KEY')
-        self.client = None
-        self.symbol = 'BTCUSDT'
-        self.data_folder = 'historical_data'
-        
-    async def initialize(self):
-        """初始化 Binance 客户端"""
-        try:
-            self.client = await AsyncClient.create(self.api_key, self.api_secret)
-            logger.info("Binance client initialized successfully")
-            
-            # 创建数据文件夹（如果不存在）
-            if not os.path.exists(self.data_folder):
-                os.makedirs(self.data_folder)
-                logger.info(f"Created data folder: {self.data_folder}")
-            
-            return True
-        except Exception as e:
-            logger.error(f"Error initializing Binance client: {e}")
-            return False
-        
-    async def get_historical_klines(self):
-        """获取BTCUSDT的历史K线数据并保存为CSV"""
-        try:
-            logger.info(f"Fetching historical klines for {self.symbol}")
-            
-            # 获取最早的可用数据
-            klines = await self.client.get_historical_klines(
-                symbol=self.symbol,
-                interval='1d',  # 日线数据
-                start_str="2017-08-17",  # BTCUSDT 在 Binance 上市的大致时间
-            )
-            
-            # 将数据转换为DataFrame
-            df = pd.DataFrame(klines, columns=[
-                'timestamp', 'open', 'high', 'low', 'close', 
-                'volume', 'close_time', 'quote_asset_volume',
-                'number_of_trades', 'taker_buy_base_asset_volume',
-                'taker_buy_quote_asset_volume', 'ignore'
-            ])
-            
-            # 转换时间戳
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
-            
-            # 转换数值类型
-            numeric_columns = ['open', 'high', 'low', 'close', 'volume', 
-                             'quote_asset_volume', 'taker_buy_base_asset_volume',
-                             'taker_buy_quote_asset_volume']
-            
-            for col in numeric_columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # 生成文件名（包含当前时间戳）
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"{self.symbol}_historical_data_{timestamp}.csv"
-            filepath = os.path.join(self.data_folder, filename)
-            
-            # 保存为CSV
-            df.to_csv(filepath, index=False)
-            logger.info(f"Successfully saved {len(df)} records to {filepath}")
-            
-            # 打印数据统计信息
-            logger.info(f"Data summary:")
-            logger.info(f"Date range: from {df['timestamp'].min()} to {df['timestamp'].max()}")
-            logger.info(f"Total trading days: {len(df)}")
-            logger.info(f"Price range: {df['low'].min():.2f} - {df['high'].max():.2f} USDT")
-            
-            return df
-            
-        except BinanceAPIException as e:
-            logger.error(f"Binance API error: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            return None
-        finally:
-            if self.client:
-                await self.client.close_connection()
-                
-    async def get_historical_trades(self):
-        """获取BTCUSDT的历史逐笔交易数据"""
-        try:
-            logger.info(f"Fetching historical trades for {self.symbol}")
-            all_trades = []
-            
-            # 获取最近的成交ID作为起点
-            trades = await self.client.get_historical_trades(
-                symbol=self.symbol,
-                limit=1000  # 每次获取1000条记录
-            )
-            
-            if trades:
-                from_id = trades[0]['id']  # 获取最早的交易ID
-                
-                while True:
-                    trades = await self.client.get_historical_trades(
-                        symbol=self.symbol,
-                        limit=1000,
-                        fromId=from_id
-                    )
-                    
-                    if not trades:
-                        break
-                        
-                    all_trades.extend(trades)
-                    logger.info(f"Fetched {len(trades)} trades, total: {len(all_trades)}")
-                    
-                    # 更新fromId为最早的交易ID
-                    from_id = trades[-1]['id'] - 1000
-                    
-                    # 保存中间结果
-                    if len(all_trades) % 10000 == 0:
-                        self._save_trades_to_csv(all_trades[-10000:], append=True)
-                    
-            return all_trades
-                
-        except BinanceAPIException as e:
-            logger.error(f"Binance API error: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            return None
-
-    def _save_trades_to_csv(self, trades, append=False):
-        """保存交易数据到CSV文件"""
-        mode = 'a' if append else 'w'
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"{self.symbol}_trades_{timestamp}.csv"
-        filepath = os.path.join(self.data_folder, filename)
-        
-        df = pd.DataFrame(trades)
-        df['time'] = pd.to_datetime(df['time'], unit='ms')
-        
-        df.to_csv(filepath, mode=mode, index=False)
-        logger.info(f"Saved {len(trades)} trades to {filepath}")
-
-async def main():
-    """主函数"""
-    turtle = TurtleTrading()
+class TurtleStrategy(bt.Strategy):
+    """海龟交易策略实现 (系统1+系统2)"""
     
-    # 初始化
-    if await turtle.initialize():
-        # 获取历史数据
-        df = await turtle.get_historical_klines()
-        if df is not None:
-            logger.info("Data retrieval completed successfully")
-        else:
-            logger.error("Failed to retrieve historical data")
-    else:
-        logger.error("Failed to initialize TurtleTrading")
-
-if __name__ == "__main__":
-    # 设置日志格式
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    params = (
+        # 系统1参数
+        ('sys1_entry_period', 20),    # 系统1入场周期
+        ('sys1_exit_period', 10),     # 系统1退出周期
+        # 系统2参数
+        ('sys2_entry_period', 55),    # 系统2入场周期
+        ('sys2_exit_period', 20),     # 系统2退出周期
+        # 共同参数
+        ('atr_period', 20),           # ATR周期
+        ('risk_ratio', 0.02),         # 账户风险比例
+        ('units', 4),                 # 最大加仓次数
+        ('unit_gap', 0.5),            # 加仓间隔（0.5N）
+        ('sys1_allocation', 0.5),     # 系统1资金分配比例
+        ('sys2_allocation', 0.5),     # 系统2资金分配比例
     )
     
-    # 运行主函数
-    asyncio.run(main())
+    def __init__(self):
+        """初始化策略"""
+        super(TurtleStrategy, self).__init__()
+        
+        # ATR和系统1的唐奇安通道
+        self.atr = bt.indicators.ATR(period=self.p.atr_period)
+        self.sys1_entry_high = bt.indicators.Highest(self.data.high, period=self.p.sys1_entry_period)
+        self.sys1_entry_low = bt.indicators.Lowest(self.data.low, period=self.p.sys1_entry_period)
+        self.sys1_exit_high = bt.indicators.Highest(self.data.high, period=self.p.sys1_exit_period)
+        self.sys1_exit_low = bt.indicators.Lowest(self.data.low, period=self.p.sys1_exit_period)
+        
+        # 系统2的唐奇安通道
+        self.sys2_entry_high = bt.indicators.Highest(self.data.high, period=self.p.sys2_entry_period)
+        self.sys2_entry_low = bt.indicators.Lowest(self.data.low, period=self.p.sys2_entry_period)
+        self.sys2_exit_high = bt.indicators.Highest(self.data.high, period=self.p.sys2_exit_period)
+        self.sys2_exit_low = bt.indicators.Lowest(self.data.low, period=self.p.sys2_exit_period)
+        
+        # 交易状态
+        self.sys1_order = None
+        self.sys2_order = None
+        self.sys1_units_long = 0
+        self.sys1_units_short = 0
+        self.sys2_units_long = 0
+        self.sys2_units_short = 0
+        self.sys1_entry_price_long = 0
+        self.sys1_entry_price_short = 0
+        self.sys2_entry_price_long = 0
+        self.sys2_entry_price_short = 0
+        
+    def log(self, txt, dt=None):
+        """记录日志"""
+        dt = dt or self.datas[0].datetime.date(0)
+        logger.info(f'{dt.isoformat()} {txt}')
+        
+    def calculate_unit_size(self):
+        """计算单位头寸大小"""
+        return (self.broker.getvalue() * self.p.risk_ratio) / self.atr[0]
+        
+    def print_strategy_info(self):
+        """打印策略基本信息"""
+        logger.info("\n" + "="*50)
+        logger.info("海龟交易策略状态报告")
+        logger.info("="*50)
+        
+        # 账户信息
+        portfolio_value = self.broker.getvalue()
+        cash = self.broker.getcash()
+        logger.info(f"\n账户信息:")
+        logger.info(f"总资产: {portfolio_value:,.2f} USDT")
+        logger.info(f"可用资金: {cash:,.2f} USDT")
+        
+        # 当前持仓
+        logger.info(f"\n当前持仓:")
+        if self.position:
+            logger.info(f"持仓大小: {self.position.size}")
+            logger.info(f"持仓成本: {self.position.price:.2f}")
+            logger.info(f"当前市值: {self.position.size * self.data.close[0]:.2f}")
+            logger.info(f"未实现盈亏: {(self.data.close[0] - self.position.price) * self.position.size:.2f}")
+        else:
+            logger.info("当前无持仓")
+        
+        # 系统1状态
+        logger.info(f"\n系统1状态:")
+        logger.info(f"多头单位数: {self.sys1_units_long}")
+        logger.info(f"空头单位数: {self.sys1_units_short}")
+        if self.sys1_entry_price_long:
+            logger.info(f"多头入场价: {self.sys1_entry_price_long:.2f}")
+        if self.sys1_entry_price_short:
+            logger.info(f"空头入场价: {self.sys1_entry_price_short:.2f}")
+        
+        # 系统2状态
+        logger.info(f"\n系统2状态:")
+        logger.info(f"多头单位数: {self.sys2_units_long}")
+        logger.info(f"空头单位数: {self.sys2_units_short}")
+        if self.sys2_entry_price_long:
+            logger.info(f"多头入场价: {self.sys2_entry_price_long:.2f}")
+        if self.sys2_entry_price_short:
+            logger.info(f"空头入场价: {self.sys2_entry_price_short:.2f}")
+        
+        # 技术指标
+        logger.info(f"\n技术指标:")
+        logger.info(f"当前ATR: {self.atr[0]:.2f}")
+        logger.info(f"系统1入场通道上轨: {self.sys1_entry_high[0]:.2f}")
+        logger.info(f"系统1入场通道下轨: {self.sys1_entry_low[0]:.2f}")
+        logger.info(f"系统2入场通道上轨: {self.sys2_entry_high[0]:.2f}")
+        logger.info(f"系统2入场通道下轨: {self.sys2_entry_low[0]:.2f}")
+        
+        logger.info("\n" + "="*50)
+
+    def next(self):
+        """主要策略逻辑"""
+        # 每100个周期打印一次策略信息
+        if len(self) % 100 == 0:
+            self.print_strategy_info()
+        
+        # 首先检查止损
+        self.check_stop_loss()
+        
+        # 然后检查系统1和系统2的信号
+        self.check_sys1_signals()
+        self.check_sys2_signals()
+        
+    def check_sys1_signals(self):
+        if self.sys1_order:
+            return
+            
+        # 没有持仓 - 寻找入场机会
+        if not self.position:
+            # 多头入场
+            if self.data.close[0] > self.sys1_entry_high[-1]:
+                size = self.calculate_unit_size()
+                self.sys1_order = self.buy(size=size)
+                self.sys1_entry_price_long = self.data.close[0]
+                self.sys1_units_long = 1
+                self.log(f'BUY CREATE {size:.2f} @ Price {self.data.close[0]:.2f}')
+                
+            # 空头入场
+            elif self.data.close[0] < self.sys1_entry_low[-1]:
+                size = self.calculate_unit_size()
+                self.sys1_order = self.sell(size=size)
+                self.sys1_entry_price_short = self.data.close[0]
+                self.sys1_units_short = 1
+                self.log(f'SELL CREATE {size:.2f} @ Price {self.data.close[0]:.2f}')
+                
+        # 持有多头
+        elif self.position.size > 0:
+            # 加仓
+            if (self.data.close[0] >= self.sys1_entry_price_long + self.atr[0] * self.p.unit_gap and 
+                self.sys1_units_long < self.p.units):
+                size = self.calculate_unit_size()
+                self.sys1_order = self.buy(size=size)
+                self.sys1_entry_price_long = self.data.close[0]
+                self.sys1_units_long += 1
+                self.log(f'BUY ADD {size:.2f} @ Price {self.data.close[0]:.2f}')
+                
+            # 退出
+            elif self.data.close[0] < self.sys1_exit_low[-1]:
+                self.sys1_order = self.close()
+                self.sys1_units_long = 0
+                self.log(f'LONG EXIT @ Price {self.data.close[0]:.2f}')
+                
+        # 持有空头
+        else:
+            # 加仓
+            if (self.data.close[0] <= self.sys1_entry_price_short - self.atr[0] * self.p.unit_gap and 
+                self.sys1_units_short < self.p.units):
+                size = self.calculate_unit_size()
+                self.sys1_order = self.sell(size=size)
+                self.sys1_entry_price_short = self.data.close[0]
+                self.sys1_units_short += 1
+                self.log(f'SELL ADD {size:.2f} @ Price {self.data.close[0]:.2f}')
+                
+            # 退出
+            elif self.data.close[0] > self.sys1_exit_high[-1]:
+                self.sys1_order = self.close()
+                self.sys1_units_short = 0
+                self.log(f'SHORT EXIT @ Price {self.data.close[0]:.2f}')
+                
+    def check_sys2_signals(self):
+        if self.sys2_order:
+            return
+            
+        # 没有持仓 - 寻找入场机会
+        if not self.position:
+            # 多头入场
+            if self.data.close[0] > self.sys2_entry_high[-1]:
+                size = self.calculate_unit_size()
+                self.sys2_order = self.buy(size=size)
+                self.sys2_entry_price_long = self.data.close[0]
+                self.sys2_units_long = 1
+                self.log(f'BUY CREATE {size:.2f} @ Price {self.data.close[0]:.2f}')
+                
+            # 空头入场
+            elif self.data.close[0] < self.sys2_entry_low[-1]:
+                size = self.calculate_unit_size()
+                self.sys2_order = self.sell(size=size)
+                self.sys2_entry_price_short = self.data.close[0]
+                self.sys2_units_short = 1
+                self.log(f'SELL CREATE {size:.2f} @ Price {self.data.close[0]:.2f}')
+                
+        # 持有多头
+        elif self.position.size > 0:
+            # 加仓
+            if (self.data.close[0] >= self.sys2_entry_price_long + self.atr[0] * self.p.unit_gap and 
+                self.sys2_units_long < self.p.units):
+                size = self.calculate_unit_size()
+                self.sys2_order = self.buy(size=size)
+                self.sys2_entry_price_long = self.data.close[0]
+                self.sys2_units_long += 1
+                self.log(f'BUY ADD {size:.2f} @ Price {self.data.close[0]:.2f}')
+                
+            # 退出
+            elif self.data.close[0] < self.sys2_exit_low[-1]:
+                self.sys2_order = self.close()
+                self.sys2_units_long = 0
+                self.log(f'LONG EXIT @ Price {self.data.close[0]:.2f}')
+                
+        # 持有空头
+        else:
+            # 加仓
+            if (self.data.close[0] <= self.sys2_entry_price_short - self.atr[0] * self.p.unit_gap and 
+                self.sys2_units_short < self.p.units):
+                size = self.calculate_unit_size()
+                self.sys2_order = self.sell(size=size)
+                self.sys2_entry_price_short = self.data.close[0]
+                self.sys2_units_short += 1
+                self.log(f'SELL ADD {size:.2f} @ Price {self.data.close[0]:.2f}')
+                
+            # 退出
+            elif self.data.close[0] > self.sys2_exit_high[-1]:
+                self.sys2_order = self.close()
+                self.sys2_units_short = 0
+                self.log(f'SHORT EXIT @ Price {self.data.close[0]:.2f}')
+                
+    def notify_order(self, order):
+        """订单状态更新通知"""
+        if order.status in [order.Submitted, order.Accepted]:
+            return
+            
+        if order.status in [order.Completed]:
+            if order.isbuy():
+                self.log(f'BUY EXECUTED, Price: {order.executed.price:.2f}, Cost: {order.executed.value:.2f}, Comm: {order.executed.comm:.2f}')
+            else:
+                self.log(f'SELL EXECUTED, Price: {order.executed.price:.2f}, Cost: {order.executed.value:.2f}, Comm: {order.executed.comm:.2f}')
+                
+        elif order.status in [order.Canceled, order.Margin, order.Rejected]:
+            self.log('Order Canceled/Margin/Rejected')
+            
+        self.sys1_order = None
+        self.sys2_order = None
+
+    def check_stop_loss(self):
+        """检查止损条件"""
+        # 系统1的止损
+        if self.sys1_units_long > 0:
+            stop_price = self.sys1_entry_price_long - 2 * self.atr[0]
+            if self.data.close[0] < stop_price:
+                self.close()
+                self.sys1_units_long = 0
+                self.log(f'SYS1 STOP LOSS @ Price {self.data.close[0]:.2f}')
+                
+        elif self.sys1_units_short > 0:
+            stop_price = self.sys1_entry_price_short + 2 * self.atr[0]
+            if self.data.close[0] > stop_price:
+                self.close()
+                self.sys1_units_short = 0
+                self.log(f'SYS1 STOP LOSS @ Price {self.data.close[0]:.2f}')
+                
+        # 系统2的止损
+        if self.sys2_units_long > 0:
+            stop_price = self.sys2_entry_price_long - 2 * self.atr[0]
+            if self.data.close[0] < stop_price:
+                self.close()
+                self.sys2_units_long = 0
+                self.log(f'SYS2 STOP LOSS @ Price {self.data.close[0]:.2f}')
+                
+        elif self.sys2_units_short > 0:
+            stop_price = self.sys2_entry_price_short + 2 * self.atr[0]
+            if self.data.close[0] > stop_price:
+                self.close()
+                self.sys2_units_short = 0
+                self.log(f'SYS2 STOP LOSS @ Price {self.data.close[0]:.2f}')
+
+    def allocate_capital(self, system_type):
+        """计算每个系统可用的资金"""
+        total_equity = self.broker.getvalue()
+        if system_type == 'sys1':
+            return total_equity * self.p.sys1_allocation
+        else:
+            return total_equity * self.p.sys2_allocation
+
+    def calculate_position_size(self, system_type):
+        """计算头寸规模"""
+        # 获取系统可用资金
+        available_capital = self.allocate_capital(system_type)
+        
+        # 计算每N的美元价值
+        dollar_volatility = self.atr[0]
+        
+        # 计算单位头寸规模
+        position_size = (available_capital * self.p.risk_ratio) / dollar_volatility
+        
+        # 考虑最小交易单位
+        min_trade_unit = 0.001  # BTC最小交易单位
+        position_size = round(position_size / min_trade_unit) * min_trade_unit
+        
+        return position_size
+
+    def print_final_stats(self):
+        """打印最终的策略性能统计"""
+        logger.info("\n" + "="*50)
+        logger.info("海龟交易策略最终表现")
+        logger.info("="*50)
+        
+        # 计算收益率
+        initial_value = self.broker.startingcash
+        final_value = self.broker.getvalue()
+        total_return = (final_value - initial_value) / initial_value * 100
+        
+        # 计算年化收益率
+        days = len(self.data)
+        annual_return = (1 + total_return/100) ** (365/days) - 1
+        
+        # 计算最大回撤
+        max_drawdown = 0
+        peak = self.broker.startingcash
+        for i in range(len(self.data)):
+            value = self.broker.get_value([self.data.datetime[i]])
+            if value > peak:
+                peak = value
+            drawdown = (peak - value) / peak * 100
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+        
+        # 输出性能指标
+        logger.info(f"\n收益统计:")
+        logger.info(f"初始资金: {initial_value:,.2f} USDT")
+        logger.info(f"最终资金: {final_value:,.2f} USDT")
+        logger.info(f"总收益率: {total_return:.2f}%")
+        logger.info(f"年化收益率: {annual_return*100:.2f}%")
+        logger.info(f"最大回撤: {max_drawdown:.2f}%")
+        
+        # 交易统计
+        logger.info(f"\n交易统计:")
+        logger.info(f"总交易次数: {self.total_trades}")
+        if self.total_trades > 0:
+            logger.info(f"胜率: {(self.winning_trades/self.total_trades)*100:.2f}%")
+            logger.info(f"平均盈利: {self.total_profit/self.winning_trades if self.winning_trades > 0 else 0:.2f} USDT")
+            logger.info(f"平均亏损: {self.total_loss/self.losing_trades if self.losing_trades > 0 else 0:.2f} USDT")
+            logger.info(f"盈亏比: {abs(self.total_profit/self.winning_trades)/(abs(self.total_loss/self.losing_trades)) if self.losing_trades > 0 else 'N/A':.2f}")
+        
+        logger.info("\n" + "="*50)
