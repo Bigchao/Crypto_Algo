@@ -35,15 +35,20 @@ class SupertrendBBStrategy(bt.Strategy):
             period=self.p.atr_period
         )
         
+        # 计算基准价格
+        self.hl2 = (self.data.high + self.data.low) / 2
+        
         # 计算上下轨
-        self.upperband = bt.indicators.HighestN(
-            (self.data.high + self.data.low) / 2 + 
-            self.p.atr_factor * self.atr,
+        self.up_band = self.hl2 + (self.p.atr_factor * self.atr)
+        self.down_band = self.hl2 - (self.p.atr_factor * self.atr)
+        
+        # 使用Highest和Lowest代替HighestN和LowestN
+        self.upperband = bt.indicators.Highest(
+            self.up_band,
             period=1
         )
-        self.lowerband = bt.indicators.LowestN(
-            (self.data.high + self.data.low) / 2 - 
-            self.p.atr_factor * self.atr,
+        self.lowerband = bt.indicators.Lowest(
+            self.down_band,
             period=1
         )
         
@@ -84,48 +89,60 @@ class SupertrendBBStrategy(bt.Strategy):
         
     def next(self):
         """主要策略逻辑"""
+        if len(self) < self.p.bb_period:  # 确保有足够的数据计算指标
+            return
+            
         if self.order:
             return
             
-        # 更新趋势方向
-        if self.data.close[0] > self.upperband[0]:
-            self.trend = 1
-        elif self.data.close[0] < self.lowerband[0]:
-            self.trend = -1
-            
         # 入场条件
         if not self.position:
-            # 多头入场：价格突破Supertrend上轨且低于布林带下轨
-            if (self.data.close[0] > self.upperband[0] and 
-                self.data.close[0] < self.bb.lines.bot[0]):
+            # 多头入场：价格突破布林带下轨且ATR显示趋势向上
+            if (self.data.close[0] < self.bb.lines.bot[0] and 
+                self.data.close[0] > self.data.close[-1] and
+                self.atr[0] > self.atr[-1]):
                 size = self.calculate_size()
-                self.log(f'BUY CREATE {size:.2f} @ Price {self.data.close[0]:.2f}')
+                self.log(f'多头信号: 价格 {self.data.close[0]:.2f} < 布林下轨 {self.bb.lines.bot[0]:.2f}')
                 self.order = self.buy(size=size)
                 
-            # 空头入场：价格突破Supertrend下轨且高于布林带上轨
-            elif (self.data.close[0] < self.lowerband[0] and 
-                  self.data.close[0] > self.bb.lines.top[0]):
+            # 空头入场：价格突破布林带上轨且ATR显示趋势向下
+            elif (self.data.close[0] > self.bb.lines.top[0] and 
+                  self.data.close[0] < self.data.close[-1] and
+                  self.atr[0] > self.atr[-1]):
                 size = self.calculate_size()
-                self.log(f'SELL CREATE {size:.2f} @ Price {self.data.close[0]:.2f}')
+                self.log(f'空头信号: 价格 {self.data.close[0]:.2f} > 布林上轨 {self.bb.lines.top[0]:.2f}')
                 self.order = self.sell(size=size)
                 
         # 持有多头
         elif self.position.size > 0:
-            # 当价格跌破Supertrend下轨时平仓
-            if self.data.close[0] < self.lowerband[0]:
-                self.log(f'CLOSE LONG @ Price {self.data.close[0]:.2f}')
+            # 当价格跌破中轨时平仓
+            if self.data.close[0] < self.bb.lines.mid[0]:
+                self.log(f'多头平仓: 价格 {self.data.close[0]:.2f} < 中轨 {self.bb.lines.mid[0]:.2f}')
                 self.order = self.close()
                 
         # 持有空头
         else:
-            # 当价格突破Supertrend上轨时平仓
-            if self.data.close[0] > self.upperband[0]:
-                self.log(f'CLOSE SHORT @ Price {self.data.close[0]:.2f}')
+            # 当价格突破中轨时平仓
+            if self.data.close[0] > self.bb.lines.mid[0]:
+                self.log(f'空头平仓: 价格 {self.data.close[0]:.2f} > 中轨 {self.bb.lines.mid[0]:.2f}')
                 self.order = self.close()
                 
     def calculate_size(self):
-        """计算头寸规模"""
+        """计算头寸大小"""
+        cash = self.broker.getcash()
         value = self.broker.getvalue()
-        price = self.data.close[0]
-        size = (value * self.p.risk_ratio) / price
-        return size 
+        
+        # 计算每笔交易的风险金额
+        risk_amount = value * self.p.risk_ratio
+        
+        # 使用ATR计算止损点位
+        stop_loss = self.atr[0] * 2
+        
+        # 如果止损为0，使用价格的1%作为止损
+        if stop_loss == 0:
+            stop_loss = self.data.close[0] * 0.01
+            
+        # 计算头寸大小
+        size = risk_amount / stop_loss
+        
+        return size
