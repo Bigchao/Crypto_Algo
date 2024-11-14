@@ -112,17 +112,58 @@ class BinanceFuturesData:
         except Exception as e:
             logger.error(f"Error saving klines to HDF5: {e}")
 
-    async def fetch_funding_rates(self, symbol, start_str=None):
-        """获取资金费率数据"""
+    async def fetch_all_funding_rates(self, symbol, start_str="2019-09-01"):
+        """获取所有历史资金费率数据"""
         try:
-            rates = await self.client.futures_funding_rate(
-                symbol=symbol,
-                startTime=start_str,
-                limit=1000
-            )
-            return rates
+            logger.info(f"Fetching all funding rates for {symbol} from {start_str}")
+            all_rates = []
+            
+            # 转换开始时间为时间戳
+            start_ts = int(datetime.strptime(start_str, "%Y-%m-%d").timestamp() * 1000)
+            end_ts = int(datetime.now().timestamp() * 1000)
+            
+            while start_ts < end_ts:
+                # 获取一批数据
+                rates = await self.client.futures_funding_rate(
+                    symbol=symbol,
+                    startTime=start_ts,
+                    limit=1000  # API限制每次最多1000条
+                )
+                
+                if not rates:
+                    break
+                    
+                all_rates.extend(rates)
+                logger.info(f"Fetched {len(rates)} funding rates, total: {len(all_rates)}")
+                
+                # 更新开始时间戳为最后一条数据的时间
+                start_ts = rates[-1]['fundingTime'] + 1
+                
+                # 添加延迟避免触发频率限制
+                await asyncio.sleep(0.5)
+            
+            if all_rates:
+                # 转换为DataFrame并保存
+                df = pd.DataFrame(all_rates)
+                df['fundingTime'] = pd.to_datetime(df['fundingTime'], unit='ms')
+                df.set_index('fundingTime', inplace=True)
+                
+                # 重采样到4小时
+                df = df.resample('4H').ffill()  # 使用前值填充
+                
+                # 保存到HDF5
+                filename = f"{symbol}_funding_rates.h5"
+                filepath = os.path.join(self.data_folder, filename)
+                df.to_hdf(filepath, key='funding_rates', mode='w')
+                logger.info(f"Saved {len(df)} funding rates to {filepath}")
+                
+            return all_rates
+                
+        except BinanceAPIException as e:
+            logger.error(f"Binance API error: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Error fetching funding rates: {e}")
+            logger.error(f"Unexpected error: {e}")
             return []
 
     async def close(self):
@@ -135,21 +176,21 @@ async def main():
     futures_data = BinanceFuturesData()
     
     if await futures_data.initialize():
-        # 获取BTC永续合约数据
         symbol = 'BTCUSDT'
         interval = '4h'
         
-        # 获取从2019年9月开始的所有数据（BTCUSDT永续合约上线时间）
+        # 获取K线数据
         await futures_data.fetch_all_futures_klines(
             symbol=symbol, 
             interval=interval,
-            start_str="2019-09-01"  # BTCUSDT永续合约开始时间
+            start_str="2019-09-01"
         )
         
-        # 获取资金费率
-        funding_rates = await futures_data.fetch_funding_rates(symbol)
-        if funding_rates:
-            logger.info(f"Fetched {len(funding_rates)} funding rate records")
+        # 获取所有资金费率数据
+        await futures_data.fetch_all_funding_rates(
+            symbol=symbol,
+            start_str="2019-09-01"
+        )
         
         await futures_data.close()
     else:
