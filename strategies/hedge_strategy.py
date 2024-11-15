@@ -21,6 +21,7 @@ class SpotFuturesHedgeStrategy(bt.Strategy):
         ('funding_threshold', 0.001), # 资金费率阈值
         ('position_size', 1.0),      # 基础仓位大小
         ('leverage', 3),             # 合约杠杆倍数
+        ('min_history', 20),         # 最小历史数据要求
     )
     
     def __init__(self):
@@ -46,33 +47,78 @@ class SpotFuturesHedgeStrategy(bt.Strategy):
         
     def next(self):
         """主要策略逻辑"""
-        if self.order:  # 如果有未完成的订单，等待
+        if len(self) < self.p.min_history:  # 确保有足够的数据计算指标
             return
             
+        if self.order:
+            return
+                
         # 获取当前价格和资金费率
         spot_price = self.spot_data.close[0]
         futures_price = self.futures_data.close[0]
-        current_funding_rate = self.funding_data[0]
+        current_funding_rate = self.funding_data[0] if len(self.funding_data) > 0 else 0
         
-        # 计算现货和合约的价差
-        basis = futures_price - spot_price
-        basis_percent = basis / spot_price
+        # 计算基差
+        basis = (futures_price - spot_price) / spot_price
         
         # 记录当前状态
-        self.log(f'现货价格: {spot_price:.2f}, 合约价格: {futures_price:.2f}, '
-                f'基差: {basis_percent:.4%}, 资金费率: {current_funding_rate:.4%}')
+        self.log(f'现货价格: {spot_price:.2f}, '
+                 f'合约价格: {futures_price:.2f}, '
+                 f'基差: {basis:.4%}, '
+                 f'资金费率: {current_funding_rate:.4%}')
         
-        # 根据资金费率调整对冲比例
-        if abs(current_funding_rate) > self.p.funding_threshold:
-            if current_funding_rate > 0:  # 多头付费
-                # 减少合约空头仓位
-                new_hedge_ratio = max(0.5, self.current_hedge_ratio - 0.1)
-            else:  # 空头付费
-                # 增加合约空头仓位
-                new_hedge_ratio = min(1.0, self.current_hedge_ratio + 0.1)
+        # 如果没有持仓，开始对冲策略
+        if not self.position:
+            # 计算仓位大小
+            spot_size = self.p.position_size
+            futures_size = spot_size * self.current_hedge_ratio
+            
+            # 在现货端做多
+            self.spot_position = self.buy(
+                data=self.spot_data,
+                size=spot_size
+            )
+            
+            # 在合约端做空
+            self.futures_position = self.sell(
+                data=self.futures_data,
+                size=futures_size
+            )
+            
+            self.log(f'开始对冲: 现货多头 {spot_size:.3f}, 合约空头 {futures_size:.3f}')
+            
+        else:
+            # 根据资金费率调整对冲比例
+            if abs(current_funding_rate) > self.p.funding_threshold:
+                if current_funding_rate > 0:  # 多头付费
+                    # 减少合约空头仓位
+                    new_hedge_ratio = max(0.5, self.current_hedge_ratio - 0.1)
+                else:  # 空头付费
+                    # 增加合约空头仓位
+                    new_hedge_ratio = min(1.0, self.current_hedge_ratio + 0.1)
                 
-            if new_hedge_ratio != self.current_hedge_ratio:
-                self.adjust_hedge_ratio(new_hedge_ratio)
+                if new_hedge_ratio != self.current_hedge_ratio:
+                    # 调整合约仓位
+                    spot_size = self.p.position_size
+                    new_futures_size = spot_size * new_hedge_ratio
+                    current_futures_size = spot_size * self.current_hedge_ratio
+                    
+                    # 计算需要调整的仓位大小
+                    adjust_size = new_futures_size - current_futures_size
+                    
+                    if adjust_size > 0:
+                        self.order = self.sell(
+                            data=self.futures_data,
+                            size=abs(adjust_size)
+                        )
+                    else:
+                        self.order = self.buy(
+                            data=self.futures_data,
+                            size=abs(adjust_size)
+                        )
+                    
+                    self.current_hedge_ratio = new_hedge_ratio
+                    self.log(f'调整对冲比例到: {new_hedge_ratio:.2f}')
     
     def log(self, txt, dt=None):
         """记录日志"""
