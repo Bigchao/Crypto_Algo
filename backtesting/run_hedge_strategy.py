@@ -37,16 +37,24 @@ def load_data():
         # 加载现货数据
         spot_file = os.path.join(project_root, 'kline_data', 'BTCUSDT_4h_klines.h5')
         spot_df = pd.read_hdf(spot_file, key='klines')
+        # 确保时间戳是datetime格式
+        spot_df['timestamp'] = pd.to_datetime(spot_df['timestamp'], unit='ms')
         spot_df.set_index('timestamp', inplace=True)
         
         # 加载合约数据
         futures_file = os.path.join(project_root, 'futures_data', 'BTCUSDT_4h_futures.h5')
         futures_df = pd.read_hdf(futures_file, key='futures_klines')
+        # 确保时间戳是datetime格式
+        futures_df['timestamp'] = pd.to_datetime(futures_df['timestamp'], unit='ms')
         futures_df.set_index('timestamp', inplace=True)
         
         # 加载资金费率数据
         funding_file = os.path.join(project_root, 'futures_data', 'BTCUSDT_funding_rates.h5')
         funding_df = pd.read_hdf(funding_file, key='funding_rates')
+        # 确保时间戳是datetime格式
+        if 'fundingTime' in funding_df.columns:
+            funding_df['fundingTime'] = pd.to_datetime(funding_df['fundingTime'], unit='ms')
+            funding_df.set_index('fundingTime', inplace=True)
         
         # 对齐数据的时间索引
         common_index = spot_df.index.intersection(futures_df.index)
@@ -71,6 +79,7 @@ def load_data():
         
     except Exception as e:
         logger.error(f"加载数据时出错: {str(e)}")
+        logger.error("详细错误信息:", exc_info=True)
         return None, None, None
 
 def run_backtest():
