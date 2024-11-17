@@ -252,10 +252,10 @@ async def handle_order_selection(bot, query):
         logger.info(f"Order selection parts: {parts}")
         
         # 添加状态检查
-        if 'order_type' not in context.user_data:
-            logger.error("Order type not found in context")
-            await show_order_menu(bot, query)
-            return
+        # if "order_type not in context.user_data:
+        #    logger.error("Order type not found in context")
+        #    await show_order_menu(bot, query)
+        #    return
             
         if len(parts) >= 3:
             _, symbol, side = parts
