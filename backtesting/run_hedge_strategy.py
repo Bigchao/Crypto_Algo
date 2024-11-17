@@ -51,6 +51,17 @@ def load_data():
         funding_file = os.path.join(project_root, 'futures_data', 'BTCUSDT_funding_rates.h5')
         funding_df = pd.read_hdf(funding_file, key='funding_rates')
         
+        # 打印资金费率数据的描述统计
+        logger.info("\n=== 资金费率数据描述 ===")
+        logger.info("原始资金费率数据形状: {}".format(funding_df.shape))
+        logger.info("资金费率数据列名: {}".format(funding_df.columns.tolist()))
+        logger.info("\n资金费率统计描述:")
+        logger.info(funding_df['fundingRate'].describe().to_string())
+        logger.info("\n资金费率数据前5行:")
+        logger.info(funding_df.head().to_string())
+        logger.info("\n资金费率数据后5行:")
+        logger.info(funding_df.tail().to_string())
+        
         # 确保资金费率数据的时间索引格式正确
         if 'fundingTime' in funding_df.columns:
             funding_df['fundingTime'] = pd.to_datetime(funding_df['fundingTime'])
